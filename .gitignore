@@ -1,0 +1,31 @@
+# Arduino build output
+build/
+*.bin
+*.elf
+*.hex
+*.map
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Dependencies
+libraries/
+
+# Secrets / local config
+*.local.*
+secrets.h
+wifi_config.h
