@@ -89,4 +89,6 @@ Keypad Cols: 38, 39, 40, 47
 
 ## License
 
-MIT
+本项目 **禁止商用**。仅限个人学习、研究、非商业用途使用。未经作者许可，不得用于商业目的。
+
+This project is **non-commercial**. Personal use, study, and research only. Commercial use requires explicit permission from the author.
