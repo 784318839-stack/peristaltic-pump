@@ -76,8 +76,8 @@ extern float calibNewSPM;
 // ----- 使能 & 屏保 -----
 extern bool         stepperEnabled;
 extern unsigned long lastStepperActivity;
-extern unsigned long lastUserActivity;
-extern bool         screensaverActive;
+// extern unsigned long lastUserActivity; // disabled
+// extern bool         screensaverActive; // disabled
 
 // ----- EEPROM -----
 extern bool eepromDirty;
@@ -130,20 +130,20 @@ void beepDisable();
 void buzz(int freq, int ms);
 
 // 显示
-void updateDisplay();
+// void updateDisplay(); // OLED disabled
 
 // 按键处理
-void handleKey(char key);
+// void handleKey(char key); // keypad disabled
 
 // ----- 硬件对象 (定义在 .ino) -----
 #include <AccelStepper.h>
-#include <U8g2lib.h>
-#include <Keypad.h>
+// #include <U8g2lib.h> // OLED disabled
+// #include <Keypad.h> // keypad disabled
 #include <EEPROM.h>
 
 extern AccelStepper stepper;
-extern U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2;
-extern Keypad keypad;
+// extern U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2; // OLED disabled
+// extern Keypad keypad; // keypad disabled
 
 // ----- 常量 -----
 #define STEP_PIN   16

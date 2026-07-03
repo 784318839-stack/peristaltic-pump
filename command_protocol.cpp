@@ -103,7 +103,7 @@ const char* parseAndExecute(const char* json) {
     if (pumpState != STATE_IDLE) return errResponse(cmd, "Pump not idle");
     if (pumpMode == MODE_JET) startJetCycle();
     else startPump();
-    lastUserActivity = millis();
+    // lastUserActivity = millis(); // OLED/keypad disabled
     return okResponse(cmd);
   }
 
@@ -178,9 +178,9 @@ const char* parseAndExecute(const char* json) {
 
   if (strcmp(cmd, "set_volume") == 0) {
     float val = params["value"] | NAN;
-    if (isnan(val) || val < 0.1 || val > 999.9)
-      return errResponse(cmd, "Value out of range (0.1-999.9)");
-    targetVolume = constrain(val, 0.1f, 999.9f);
+    if (isnan(val) || val < 0.1 || val > 99999)
+      return errResponse(cmd, "Value out of range (0.1-99999)");
+    targetVolume = constrain(val, 0.1f, 99999.0f);
     currentMenu = MAIN;
     markDirty();
     beepConfirm();
@@ -245,7 +245,7 @@ const char* parseAndExecute(const char* json) {
     if (pumpMode != MODE_JET) return errResponse(cmd, "Not in jet mode");
     if (pumpState != STATE_IDLE) return errResponse(cmd, "Pump not idle");
     startJetCycle();
-    lastUserActivity = millis();
+    // lastUserActivity = millis(); // OLED/keypad disabled
     return okResponse(cmd);
   }
 
@@ -283,9 +283,9 @@ const char* parseAndExecute(const char* json) {
     if (currentMenu != CALIBRATE || calibStep != CALIB_SET_VOL)
       return errResponse(cmd, "Not at calib set volume step");
     float val = params["value"] | NAN;
-    if (isnan(val) || val < 0.1 || val > 999.9)
-      return errResponse(cmd, "Volume out of range (0.1-999.9)");
-    calibTargetVol = constrain(val, 0.1f, 999.9f);
+    if (isnan(val) || val < 0.1 || val > 99999)
+      return errResponse(cmd, "Volume out of range (0.1-99999)");
+    calibTargetVol = constrain(val, 0.1f, 99999.0f);
     calibStep = CALIB_RUN;
     beepConfirm();
     return okResponse(cmd);
@@ -295,7 +295,7 @@ const char* parseAndExecute(const char* json) {
     if (currentMenu != CALIBRATE || calibStep != CALIB_RUN)
       return errResponse(cmd, "Not at calib run step");
     calibStartRun();
-    lastUserActivity = millis();
+    // lastUserActivity = millis(); // OLED/keypad disabled
     return okResponse(cmd);
   }
 
@@ -310,7 +310,7 @@ const char* parseAndExecute(const char* json) {
     if (currentMenu != CALIBRATE || calibStep != CALIB_MEASURE)
       return errResponse(cmd, "Not at calib measure step");
     float val = params["value"] | NAN;
-    if (isnan(val) || val <= 0 || val > 999.9)
+    if (isnan(val) || val <= 0 || val > 99999)
       return errResponse(cmd, "Measured volume out of range");
     calibActualVol = val;
     calibCalculate();
@@ -387,7 +387,7 @@ const char* parseAndExecute(const char* json) {
     dispensedVolume = 0;
     pumpState = RUNNING;
     beepStart();
-    lastUserActivity = millis();
+    // lastUserActivity = millis(); // OLED/keypad disabled
     return okResponse(cmd);
   }
 
