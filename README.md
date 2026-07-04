@@ -1,38 +1,177 @@
 # 蠕动泵控制器 — YZ1515 精密点液/喷射工作站
 
-基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现体积模式、时间模式、喷射模式三种精密流体控制。
+基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。
+
+> **v2.0** — 全面转向远程控制：WiFi Web UI + BLE UART + USB Serial，OLED/键盘已停用。
+
+---
+
+## 控制方式 (v2.0)
+
+| 接口 | 说明 |
+|---|---|
+| **WiFi Web UI** | 手机/PC 浏览器直连，PWA 可添加到桌面 |
+| **BLE UART** | Nordic UART Service，设备名 `PumpCtrl-XXXX` |
+| **USB Serial** | 通过 USB-CDC 串口发送 JSON 命令 (115200bps) |
+
+三通道共用同一套 **JSON 命令协议**，可同时使用。
+
+---
+
+## WiFi 网络
+
+- **默认模式**: SoftAP，手机/PC 直连，无需路由器
+  - SSID: `PumpCtrl-XXXX`（XXXX = MAC 后 4 位）
+  - IP: `192.168.4.1`
+- **可选模式**: Station + SoftAP 回退
+  - 可通过 Web UI 或 API 配置路由器 WiFi
+  - Station 失败自动回退到 SoftAP
+  - 配置保存在 EEPROM，掉电不丢失
+
+---
+
+## Web UI 功能
+
+内嵌单页应用 (SPA)，手机端 PWA 支持：
+
+- 📊 **实时仪表盘** — 状态、模式、进度、流量、体积、时间、温度
+- 🎮 **运行控制** — 启动/暂停/恢复/停止
+- ⚙️ **参数设置** — 流量、体积、时间、喷射参数
+- 🔧 **模式切换** — 体积/时间/喷射模式一键切换
+- 💧 **液体选择** — 4 种液体独立校准参数切换
+- 📐 **校准向导** — 6 步引导式校准流程
+- 💾 **方案预设** — 4 槽位加载/保存
+- 🚿 **预灌快排** — 全速排空管路
+- 📡 **WiFi 管理** — 扫描网络、配置连接
+- 📈 **管路寿命** — 累计流量百分比显示
+
+---
 
 ## 硬件配置
 
 | 部件 | 型号 / 规格 |
 |---|---|
 | 主控 | ESP32-S3-WROOM-1-N16 (16MB Flash) |
-| 泵头 | YZ1515 (工业级) |
-| 显示屏 | SH1106 OLED 128×64 I2C (GPIO21/22) |
-| 键盘 | 4×4 矩阵键盘 |
-| 电机 | 42/57 步进电机 + 驱动器 (GPIO16/17/18) |
-| 蜂鸣器 | 有源蜂鸣器 GPIO1 |
+| 泵头 | YZ1515 (工业级, 100×80×80mm) |
+| 电机 | 42/57 步进电机 + 驱动器 |
+| 蜂鸣器 | 有源蜂鸣器 GPIO5 |
+| 显示屏 | SH1106 OLED 128×64 I2C *(v2.0 已停用)* |
+| 键盘 | 4×4 矩阵键盘 *(v2.0 已停用)* |
 
-## 功能清单
+---
 
-1. **体积模式** — 设定流量 + 目标体积，恒速运行自动停止
-2. **时间模式** — 设定体积 + 时间，自动计算流量，定时定量
-3. **喷射模式** — 设定单次量 + 间隔 + 流量 + 压力，循环喷射
+## 功能清单 (16 项)
+
+### 泵送模式
+
+1. **体积模式** — 设定流量 (0.1–2000 mL/min) + 目标体积 (0.1–99999 mL)，恒速运行自动停止
+2. **时间模式** — 设定体积 + 时间 (1–86400s)，自动计算流量，定时定量
+3. **喷射模式** — 设定单次量 (0.1–10 mL) + 间隔 (1–60s) + 流量 + 压力 (1–10 级)，循环喷射
    - 双参数控制：流量管远近、压力管爆发力
-   - 无回吸、柔和加速可调
-   - 间隔 >15s 自动断电，提前 2s 通电
-4. **暂停/恢复** — 运行中暂停，从断点继续
-5. **防滴回吸** — 完成后反转吸回（ANTI_DRIP 状态，不可打断）
-6. **校准向导** — 5 步引导（选液体 → 设体积 → 运行 → 读量筒 → 结果）
-7. **4 种液体独立校准** — 水/粘稠/有机/自定义
-8. **方案预设存储** — 4 槽位，一键加载/保存整套参数
-9. **高级设置** — 回吸量/管路寿命/选液体
-10. **预灌/快排** — 全速 2000 mL/min 排空
-11. **匀加速** — AccelStepper 缓启动/缓停止
-12. **自动关使能** — 待机 5s 后断电
-13. **OLED 屏保** — 2 分钟无操作休眠
-14. **蜂鸣器** — 7 种音效反馈
-15. **EEPROM 掉电记忆** — 全部参数 + 4 液体校准 + 4 方案 + WiFi
+   - 无回吸、柔和加速可选
+   - 间隔 >15s 自动断电，提前 2s 通电节能
+
+### 运行控制
+
+4. **暂停/恢复** — 运行中暂停，从断点恢复继续
+5. **防滴回吸** — 完成后反转吸回 (ANTI_DRIP 状态，不可打断)
+6. **预灌/快排** — 全速 2000 mL/min 排空管路
+7. **匀加速** — AccelStepper 缓启动/缓停止，无冲击
+
+### 校准 & 液体
+
+8. **校准向导** — 6 步引导（选液体 → 设体积 → 运行 → 读取量筒 → 计算结果 → 保存）
+9. **4 种液体独立校准** — 水 / 粘稠 / 有机 / 自定义，每种独立 stepsPerMl
+
+### 存储 & 预设
+
+10. **方案预设存储** — 4 槽位，一键加载/保存整套运行参数
+11. **EEPROM 掉电记忆** — 全部参数 + 4 液体校准 + 4 方案 + WiFi 配置
+
+### 智能保护
+
+12. **自动关使能** — 待机/暂停 5s 后步进电机自动断电，节能降热
+13. **管路寿命追踪** — 累计流量统计，达到设定值提醒更换 (0=禁用)
+
+### 反馈
+
+14. **蜂鸣器** — 7 种音效（按键/确认/取消/启动/暂停/完成/断电）
+15. **实时遥测** — `/api/status` 返回完整 JSON（状态/模式/参数/进度/WiFi 信息）
+
+### 高级
+
+16. **多客户端并发** — FreeRTOS 命令队列，WiFi + BLE + USB 三通道同时工作，线程安全
+
+---
+
+## JSON 命令协议
+
+所有控制接口（WiFi / BLE / USB Serial）共用同一套协议。
+
+### HTTP API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/` | Web UI 页面 |
+| GET | `/api/status` | 完整遥测 JSON |
+| GET | `/api/cmd?c=<json>` | 发送命令 |
+| POST | `/api/wifi` | 配置 WiFi 连接 |
+| GET | `/api/scan` | 扫描附近 WiFi 网络 |
+
+### 命令列表
+
+| 命令 | 参数 | 说明 |
+|---|---|---|
+| `start` | — | 启动泵送/喷射循环 |
+| `pause` | — | 暂停运行 |
+| `resume` | — | 恢复运行 |
+| `stop` / `reset` | — | 停止并复位 |
+| `set_mode` | `mode`: "VOLUME"/"TIME"/"JET" | 切换泵送模式 |
+| `set_liquid` | `index`: 0–3 | 切换液体 |
+| `set_flow` | `value`: 0.1–2000 | 设定流量 (mL/min) |
+| `set_volume` | `value`: 0.1–99999 | 设定目标体积 (mL) |
+| `set_time` | `value`: 1–86400 | 设定目标时间 (s) |
+| `set_jet_vol` | `value`: 0.1–10 | 设定单次喷射量 (mL) |
+| `set_jet_interval` | `value`: 1–60 | 设定喷射间隔 (s) |
+| `set_jet_flow` | `value`: 10–2000 | 设定喷射流量 (mL/min) |
+| `set_jet_pressure` | `value`: 1–10 | 设定喷射压力等级 |
+| `jet_start` / `jet_stop` | — | 喷射模式启停 |
+| `set_anti_drip` | `value`: 0–5 | 设定回吸量 (mL) |
+| `set_tube_life` | `value`: 0–200000 | 设定管路寿命 (mL) |
+| `preset_load` / `preset_save` | `slot`: 0–3 | 方案预设加载/保存 |
+| `calib_enter` → … → `calib_save` | (6 步流程) | 校准向导 |
+| `prime_start` / `prime_stop` | — | 预灌快排 |
+| `get_state` | — | 获取完整状态遥测 |
+| `wifi_restart` | — | 重启 WiFi |
+| `menu_main` | — | 返回主菜单 |
+
+### 遥测响应示例
+
+```json
+{
+  "type": "telemetry",
+  "ts": 123456789,
+  "state": "RUNNING",
+  "mode": "VOLUME",
+  "liquid": "Water",
+  "flow": 150.0,
+  "targetVol": 50.0,
+  "dispensed": 23.45,
+  "progress": 46,
+  "elapsed": 9,
+  "totalDispensed": 12340.5,
+  "tubePct": 24,
+  "stepsPerMl": 1860.5,
+  "antiDripVol": 0.30,
+  "stepperEnabled": true,
+  "calibStep": 0,
+  "wifiMode": "ap",
+  "wifiIP": "192.168.4.1",
+  "wifiClients": 1
+}
+```
+
+---
 
 ## 状态机
 
@@ -41,51 +180,77 @@ State:  IDLE → RUNNING → PAUSED (⇄ RUNNING) → ANTI_DRIP → DONE
 Mode:   MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 ```
 
-## 按键操作
-
-| 键 | 主菜单 |
-|---|---|
-| A | 设流量/体积/单次量 |
-| B | 设体积/时间/间隔 |
-| C | 启停/暂停/恢复 |
-| D | 切换模式 → 选液体 |
-| * | 复位 |
-| # | 校准/喷射设置 |
-| 0 | 预灌 |
-| 1-4 | 方案预设 |
+---
 
 ## 烧录配置 (Arduino IDE)
 
-- Board: **ESP32S3 Dev Module**
-- PSRAM: **Disabled**
-- USB CDC On Boot: **Disabled**
-- Partition Scheme: **Huge APP (3MB No OTA/1MB SPIFFS)**
-- 串口波特率: 115200
+| 选项 | 值 |
+|---|---|
+| Board | **ESP32S3 Dev Module** |
+| PSRAM | **Disabled** |
+| USB CDC On Boot | **Disabled** |
+| Partition Scheme | **Huge APP (3MB No OTA/1MB SPIFFS)** |
+| Flash Size | **16MB (128Mb)** |
+| 串口波特率 | **115200** |
+
+---
 
 ## 关键引脚
 
 ```
 STEP: 16    DIR: 17    ENA: 18
-I2C SDA: 21  I2C SCL: 22
-Buzzer: 1
-Keypad Rows: 4, 5, 13, 42
+Buzzer: 5
+I2C SDA: 21  I2C SCL: 7    (OLED — v2.0 已停用)
+Keypad Rows: 4, 5, 13, 42   (键盘 — v2.0 已停用)
 Keypad Cols: 38, 39, 40, 47
 ```
 
-## 安全引脚（已验证）
+### 安全引脚 (已验证)
 
-- STEP/DIR/ENA: GPIO 16/17/18 ✓
-- Buzzer: GPIO 1 ✓
-- I2C: GPIO 21(SDA)/22(SCL) ✓
-- 避开 Strapping 引脚: GPIO 0/3/45/46
-- 避开 PSRAM 占用: GPIO 27/32/33/34/35/36/37
-- 避开 JTAG: GPIO 14/15
+- ✅ STEP/DIR/ENA: GPIO 16/17/18
+- ✅ Buzzer: GPIO 5
+- ✅ I2C: GPIO 21(SDA)/7(SCL)
+- ❌ 避开 Strapping: GPIO 0/3/45/46
+- ❌ 避开 PSRAM 占用: GPIO 27/32/33/34/35/36/37
+- ❌ 避开 JTAG: GPIO 14/15
+
+---
+
+## 项目结构
+
+```
+peristaltic_pump/
+├── peristaltic_pump.ino      # 主程序 (~2135 行)
+├── pump_shared.h             # 共享类型 & extern 声明
+├── wifi_manager.h/cpp        # WiFi 管理 (SoftAP/Station + EEPROM)
+├── bluetooth_manager.h/cpp   # BLE UART (NimBLE / Nordic UART Service)
+├── web_handlers.h/cpp        # HTTP 服务 (路由 / 内嵌页面)
+├── web_ui_gen.h              # Web UI (内嵌 HTML/CSS/JS, ~396 行 gzip 友好)
+├── command_protocol.h/cpp    # JSON 命令协议 (解析/路由/遥测, ~558 行)
+├── serial_commands.h/cpp     # USB 串口命令入口
+├── pump_chinese_font.h       # 中文字库 (SimHei 14px, 124 字 — OLED 已停用)
+├── generate_font.py          # 字库生成脚本
+├── build_web_ui.py           # Web UI 构建脚本 → web_ui_gen.h
+├── strip_chinese.py          # 中文字符串提取脚本
+├── strip_kb_oled.py          # 剥离键盘/OLED 代码脚本
+├── apply_cn.py               # 中文字库应用脚本
+├── gen_font.py               # 旧版字库生成
+└── README.md
+```
+
+---
 
 ## 依赖库
 
-- [U8g2](https://github.com/olikraus/u8g2) — OLED 图形库
-- [Keypad](https://github.com/Chris--A/Keypad) — 矩阵键盘
-- [AccelStepper](https://github.com/waspinator/AccelStepper) — 步进电机驱动
+| 库 | 用途 |
+|---|---|
+| [AccelStepper](https://github.com/waspinator/AccelStepper) | 步进电机驱动 (匀加速) |
+| [ArduinoJson](https://arduinojson.org/) (v7) | JSON 解析/序列化 |
+| [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) | BLE UART |
+| [U8g2](https://github.com/olikraus/u8g2) | OLED 图形库 *(v2.0 已停用)* |
+| [Keypad](https://github.com/Chris--A/Keypad) | 矩阵键盘 *(v2.0 已停用)* |
+
+---
 
 ## License
 
