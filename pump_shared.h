@@ -151,4 +151,8 @@ extern AccelStepper stepper;
 #define ENA_PIN    18
 #define BUZZER_PIN 5
 
+// 硬件 UART (用于 PC 直连控制, USB-TTL 转接板)
+#define HW_UART_RX 48
+#define HW_UART_TX 47
+
 #endif // PUMP_SHARED_H

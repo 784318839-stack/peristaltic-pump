@@ -15,4 +15,8 @@ void initSerialCommands();
 // 非阻塞轮询串口, 读到完整一行后解析执行 (loop 中调用)
 void processSerialCommands();
 
+// ----- 硬件 UART (GPIO 44=RX, 43=TX, 115200, USB-TTL 直连 PC) -----
+void initHardwareUart();
+void processHardwareUart();
+
 #endif // SERIAL_COMMANDS_H

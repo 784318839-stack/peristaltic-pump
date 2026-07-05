@@ -1990,6 +1990,9 @@ void setup() {
   initSerialCommands();
   Serial.println("[SETUP] serial ok");
 
+  initHardwareUart();
+  Serial.println("[SETUP] hw uart ok (GPIO 48=RX, 47=TX)");
+
   // Step 3: OLED
   // pinMode(I2C_SDA, INPUT_PULLUP); // OLED disabled
   // pinMode(I2C_SCL, INPUT_PULLUP); // OLED disabled
@@ -2034,6 +2037,7 @@ void loop() {
 
   // ---- 第 1.5 步: 串口命令 ----
   processSerialCommands();
+  processHardwareUart();
   handleWebClients();
   handleBluetooth();
 
