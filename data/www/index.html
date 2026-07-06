@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>蠕动泵控制器</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--card:#161b22;--border:#30363d;
+  --accent:#e94560;--accent2:#0f3460;--green:#238636;--yellow:#d2991d;--red:#da3633;
+  --text:#e6edf3;--text2:#8b949e;--text3:#484f58;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
+/* Header */
+header{background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:600}
+#connDot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;transition:background .3s}
+#connDot.ok{background:var(--green)}#connDot.warn{background:var(--yellow)}#connDot.err{background:var(--red)}
+#connText{font-size:12px;color:var(--text2)}
+/* Main */
+main{max-width:480px;margin:0 auto;padding:12px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+.card h2{font-size:14px;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px}
+/* Stats grid */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{text-align:center;padding:8px 4px}
+.stat .val{font-size:26px;font-weight:700;color:var(--accent);line-height:1.2}
+.stat .val.small{font-size:18px}
+.stat .lbl{font-size:11px;color:var(--text2);margin-top:2px}
+.stat.full{grid-column:1/-1}
+/* Progress */
+.progress-bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin:8px 0}
+.progress-fill{height:100%;background:var(--accent);border-radius:4px;transition:width .3s;width:0%}
+/* Buttons */
+.btn-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+button{border:none;border-radius:10px;padding:12px 16px;font-size:15px;font-weight:600;cursor:pointer;transition:all .15s;touch-action:manipulation;min-height:44px;-webkit-tap-highlight-color:transparent}
+button:active{transform:scale(.95);opacity:.8}
+.btn-start{background:var(--green);color:#fff;flex:1;min-width:80px}
+.btn-pause{background:var(--yellow);color:#000;flex:1;min-width:80px}
+.btn-stop{background:var(--red);color:#fff;flex:1;min-width:80px}
+.btn-action{background:var(--accent2);color:var(--text);flex:1;min-width:70px;font-size:13px;padding:10px 8px}
+.btn-sm{background:var(--border);color:var(--text);font-size:12px;padding:8px 12px;min-height:36px}
+.btn-active{background:var(--accent)!important;color:#fff!important}
+.btn-disabled{opacity:.4;pointer-events:none}
+/* Mode tabs */
+.mode-tabs{display:flex;gap:4px;margin-bottom:12px}
+.mode-tab{flex:1;text-align:center;padding:10px 6px;border-radius:8px;font-size:13px;font-weight:600;background:var(--border);color:var(--text2);cursor:pointer;transition:all .15s}
+.mode-tab.active{background:var(--accent);color:#fff}
+/* Input */
+.input-row{display:flex;gap:6px;align-items:center;margin:8px 0}
+.input-row label{font-size:13px;color:var(--text2);min-width:50px;text-align:right}
+.input-row input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:16px;outline:none}
+.input-row input:focus{border-color:var(--accent)}
+.input-row .unit{font-size:12px;color:var(--text3);min-width:40px}
+/* Jet panel */
+.jet-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.jet-grid label{font-size:12px;color:var(--text2)}
+.jet-grid input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:14px}
+/* Calibration steps */
+.calib-steps{display:flex;gap:4px;margin-bottom:12px}
+.calib-step{flex:1;text-align:center;font-size:10px;color:var(--text3);padding:6px 2px;background:var(--border);border-radius:6px;transition:all .15s}
+.calib-step.active{background:var(--accent);color:#fff;font-weight:600}
+.calib-step.done{background:var(--green);color:#fff}
+.calib-content{padding:8px 0}
+/* Liquid selector */
+.liquid-row{display:flex;gap:6px;margin:8px 0}
+.liquid-btn{flex:1;padding:10px;border-radius:8px;background:var(--border);color:var(--text2);text-align:center;font-size:13px;cursor:pointer}
+.liquid-btn.active{background:var(--accent);color:#fff}
+/* WiFi panel */
+.wifi-card{margin-top:10px}
+/* Toast */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);padding:10px 20px;border-radius:20px;font-size:14px;z-index:100;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.error{border-color:var(--red);color:var(--red)}
+/* Responsive */
+@media(min-width:600px){
+  .stats{grid-template-columns:repeat(4,1fr)}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <span id="connDot" class="err"></span>
+    <span id="connText">未连接</span>
+  </div>
+  <h1>蠕动泵</h1>
+  <div style="font-size:12px;color:var(--text3)" id="wifiInfo"></div>
+</header>
+
+<main>
+  <!-- 状态卡片 -->
+  <div class="card">
+    <h2>实时状态</h2>
+    <div class="stats">
+      <div class="stat"><div class="val" id="stState">--</div><div class="lbl">运行状态</div></div>
+      <div class="stat"><div class="val small" id="stMode">--</div><div class="lbl">模式</div></div>
+      <div class="stat"><div class="val small" id="stFlow">--</div><div class="lbl">流量 mL/min</div></div>
+      <div class="stat"><div class="val small" id="stDisp">--</div><div class="lbl">已出 mL</div></div>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progressBar"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2)">
+      <span id="stProgress">0%</span>
+      <span>目标: <span id="stTarget">--</span> mL</span>
+    </div>
+  </div>
+
+  <!-- 模式切换 -->
+  <div class="card">
+    <div class="mode-tabs" id="modeTabs">
+      <div class="mode-tab active" data-mode="VOLUME">体积模式</div>
+      <div class="mode-tab" data-mode="TIME">定时模式</div>
+      <div class="mode-tab" data-mode="JET">喷射模式</div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--text2)">液体:</span>
+      <div class="liquid-row" id="liquidRow" style="margin:0;flex:1"></div>
+    </div>
+  </div>
+
+  <!-- 控制按钮 -->
+  <div class="card">
+    <h2>运行控制</h2>
+    <div class="btn-row">
+      <button class="btn-start" onclick="sendCmd('start')" id="btnStart">▶ 启动</button>
+      <button class="btn-pause" onclick="sendCmd('pause')" id="btnPause" disabled>⏸ 暂停</button>
+      <button class="btn-stop" onclick="sendCmd('stop')" id="btnStop" disabled>■ 停止</button>
+    </div>
+  </div>
+
+  <!-- 参数设置 -->
+  <div class="card" id="paramCard">
+    <h2>参数设置</h2>
+    <div id="paramVolume">
+      <div class="input-row">
+        <label>流量</label><input type="number" id="inFlow" value="50" step="0.1" min="0.1" max="2000"><span class="unit">mL/min</span>
+      </div>
+      <div class="input-row">
+        <label>体积</label><input type="number" id="inVolume" value="10" step="0.1" min="0.1" max="999.9"><span class="unit">mL</span>
+      </div>
+      <button class="btn-action" onclick="sendCmd('set_flow',{value:parseFloat($('#inFlow').value)})">应用流量</button>
+      <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inVolume').value)})">应用体积</button>
+    </div>
+    <div id="paramTime" style="display:none">
+      <div class="input-row">
+        <label>体积</label><input type="number" id="inTimeVol" value="10" step="0.1" min="0.1" max="999.9"><span class="unit">mL</span>
+      </div>
+      <div class="input-row">
+        <label>时间</label><input type="number" id="inTimeSec" value="30" step="1" min="1" max="86400"><span class="unit">秒</span>
+      </div>
+      <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inTimeVol').value)})">应用体积</button>
+      <button class="btn-action" onclick="sendCmd('set_time',{value:parseFloat($('#inTimeSec').value)})">应用时间</button>
+    </div>
+    <div id="paramJet" style="display:none">
+      <div class="jet-grid">
+        <div><label>单次量 mL</label><input type="number" id="inJetVol" value="1" step="0.1" min="0.1" max="10"></div>
+        <div><label>间隔 秒</label><input type="number" id="inJetInt" value="3" step="1" min="1" max="60"></div>
+        <div><label>流量 mL/min</label><input type="number" id="inJetFlow" value="200" step="1" min="10" max="2000"></div>
+        <div><label>压力 1-10</label><input type="number" id="inJetPres" value="5" step="1" min="1" max="10"></div>
+      </div>
+      <button class="btn-action" onclick="sendCmd('set_jet_vol',{value:parseFloat($('#inJetVol').value)})">应用单次量</button>
+      <button class="btn-action" onclick="sendCmd('set_jet_interval',{value:parseFloat($('#inJetInt').value)})">应用间隔</button>
+      <button class="btn-action" onclick="sendCmd('set_jet_flow',{value:parseFloat($('#inJetFlow').value)})">应用流量</button>
+      <button class="btn-action" onclick="sendCmd('set_jet_pressure',{value:parseFloat($('#inJetPres').value)})">应用压力</button>
+    </div>
+  </div>
+
+  <!-- 快捷操作 -->
+  <div class="card">
+    <h2>快捷操作</h2>
+    <div class="btn-row">
+      <button class="btn-sm" onclick="sendCmd('prime_start')">预灌/快排</button>
+      <button class="btn-sm" onclick="sendCmd('prime_stop')">停止预灌</button>
+      <button class="btn-sm btn-active" onclick="showPanel('calib')">校准向导</button>
+      <button class="btn-sm" onclick="showPanel('preset')">方案预设</button>
+      <button class="btn-sm" onclick="showPanel('wifi')">WiFi 设置</button>
+    </div>
+  </div>
+
+  <!-- 校准面板 -->
+  <div class="card" id="panelCalib" style="display:none">
+    <h2>校准向导 <button class="btn-sm" style="float:right" onclick="sendCmd('calib_enter')">开始校准</button></h2>
+    <div class="calib-steps" id="calibSteps">
+      <div class="calib-step" data-step="0">1.选液体</div>
+      <div class="calib-step" data-step="1">2.设体积</div>
+      <div class="calib-step" data-step="2">3.运行</div>
+      <div class="calib-step" data-step="3">4.读数</div>
+      <div class="calib-step" data-step="4">5.保存</div>
+      <div class="calib-step" data-step="5">高级设置</div>
+    </div>
+    <div class="calib-content" id="calibContent">
+      <p style="color:var(--text2);font-size:13px">点击 "开始校准" 启动 5 步校准向导。</p>
+      <p style="color:var(--text2);font-size:13px">也可在泵的实体键盘上按 # 键进行校准。</p>
+    </div>
+    <div class="btn-row" id="calibButtons" style="display:none">
+      <button class="btn-action" id="calibBtn1" onclick="calibAction(1)">--</button>
+      <button class="btn-action" id="calibBtn2" onclick="calibAction(2)">--</button>
+    </div>
+  </div>
+
+  <!-- 方案预设面板 -->
+  <div class="card" id="panelPreset" style="display:none">
+    <h2>方案预设</h2>
+    <div class="btn-row" id="presetSlots"></div>
+  </div>
+
+  <!-- WiFi 设置面板 -->
+  <div class="card" id="panelWifi" style="display:none">
+    <h2>WiFi 设置</h2>
+    <div class="input-row">
+      <label>SSID</label><input type="text" id="wifiSSID" placeholder="留空 = 仅热点">
+    </div>
+    <div class="input-row">
+      <label>密码</label><input type="password" id="wifiPass" placeholder="WiFi 密码">
+    </div>
+    <div class="btn-row">
+      <button class="btn-action" onclick="wifiSave()">保存配置</button>
+      <button class="btn-sm" onclick="wifiScan()">扫描网络</button>
+    </div>
+    <div id="wifiScanResult" style="margin-top:8px;font-size:12px"></div>
+  </div>
+
+  <!-- 设备信息 -->
+  <div class="card" style="text-align:center">
+    <span style="font-size:11px;color:var(--text3)">
+      累计: <span id="stTotal">--</span> mL |
+      管路: <span id="stTube">--</span>% |
+      电机: <span id="stMotor">--</span>
+    </span>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================== Helpers ==============================
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+let socket = null;
+let reconnectTimer = null;
+let reconnectDelay = 1000;
+let currentMode = 'VOLUME';
+let currentState = 'IDLE';
+let currentStep = -1;  // calibration step
+
+// Helper: only update input field if user is not currently editing it
+function safeSetInput(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (document.activeElement === el) return;  // skip — user is typing
+  if (typeof val === 'number') el.value = val;
+  else el.value = val;
+}
+
+// ============================== WebSocket ==============================
+function connect() {
+  if (socket) { try { socket.close() } catch(e){} }
+  const wsUrl = 'ws://' + location.host + '/ws';
+  socket = new WebSocket(wsUrl);
+  socket.onopen = () => {
+    setConn('ok', '已连接');
+    reconnectDelay = 1000;
+    requestAnimationFrame(() => sendCmd('get_state'));
+  };
+  socket.onclose = () => {
+    setConn('err', '断开');
+    scheduleReconnect();
+  };
+  socket.onerror = () => { setConn('err', '错误'); scheduleReconnect(); };
+  socket.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'telemetry') updateUI(d);
+      else if (d.type === 'response') {
+        if (!d.ok) {
+          if (d.id !== 'get_state') toast('✗ ' + (d.error || '失败'), true);
+        } else if (d.id === 'start') toast('▶ 已启动');
+        else if (d.id === 'pause') toast('⏸ 已暂停');
+        else if (d.id === 'stop') toast('■ 已停止');
+        else if (d.id !== 'get_state') toast('✓ 完成');
+      }
+    } catch(ex) {}
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  setConn('warn', '重连中...');
+  reconnectTimer = setTimeout(() => {
+    connect();
+    reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+  }, reconnectDelay);
+}
+
+function setConn(cls, text) {
+  const dot = $('#connDot'), txt = $('#connText');
+  dot.className = cls; txt.textContent = text;
+}
+
+function sendCmd(cmd, params = {}) {
+  if (!socket || socket.readyState !== 1) {
+    toast('未连接', true); return;
+  }
+  socket.send(JSON.stringify({ cmd, params }));
+}
+
+// ============================== UI Update ==============================
+function updateUI(d) {
+  // State
+  currentState = d.state;
+  currentMode = d.mode;
+  $('#stState').textContent = d.state;
+  $('#stMode').textContent = d.mode;
+  $('#stFlow').textContent = d.flow.toFixed(1);
+  $('#stDisp').textContent = d.dispensed.toFixed(2);
+  $('#stTarget').textContent = d.targetVol.toFixed(1);
+  $('#progressBar').style.width = d.progress + '%';
+  $('#stProgress').textContent = d.progress + '%';
+  $('#stTotal').textContent = d.totalDispensed.toFixed(0);
+  $('#stTube').textContent = d.tubePct;
+  $('#stMotor').textContent = d.stepperEnabled ? '使能' : '断电';
+
+  // Mode tabs
+  $$('.mode-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === d.mode);
+  });
+
+  // Update input fields from telemetry (skip if user is editing them)
+  safeSetInput('inFlow', d.flow);
+  safeSetInput('inVolume', d.targetVol);
+  safeSetInput('inTimeVol', d.targetVol);
+  safeSetInput('inTimeSec', d.targetTime);
+  safeSetInput('inJetVol', d.jetVolume);
+  safeSetInput('inJetInt', d.jetInterval);
+  safeSetInput('inJetFlow', d.jetFlowRate);
+  safeSetInput('inJetPres', d.jetPressure);
+
+  // Show/hide param sections based on mode
+  $('#paramVolume').style.display = (d.mode === 'VOLUME') ? '' : 'none';
+  $('#paramTime').style.display = (d.mode === 'TIME') ? '' : 'none';
+  $('#paramJet').style.display = (d.mode === 'JET') ? '' : 'none';
+
+  // Button states
+  const isIdle = d.state === 'IDLE';
+  const isRunning = d.state === 'RUNNING';
+  const isPaused = d.state === 'PAUSED';
+  const isDone = d.state === 'DONE';
+
+  $('#btnStart').disabled = !isIdle;
+  $('#btnPause').disabled = !isRunning;
+  $('#btnStop').disabled = !(isRunning || isPaused);
+
+  // Calibration steps (0=IDLE, 1=SELECT_LIQUID, 2=SET_VOL, 3=RUN, 4=MEASURE, 5=RESULT, 6=SETTINGS)
+  if (d.calibStep !== undefined && d.calibStep >= 0) {
+    // Map: calibStep 1-5 → UI step 0-4, calibStep 6 (SETTINGS) → UI step 5
+    var uiStep = d.calibStep - 1;
+    updateCalibSteps(uiStep);
+  }
+
+  // WiFi info
+  if (d.wifiMode) {
+    var info = d.wifiMode;
+    if (d.wifiIP) info += ' | ' + d.wifiIP;
+    if (d.wifiClients !== undefined && d.wifiClients > 0) info += ' | 📶' + d.wifiClients;
+    $('#wifiInfo').textContent = info;
+  }
+}
+
+// ============================== Mode Tabs ==============================
+$$('.mode-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const mode = tab.dataset.mode;
+    if (mode !== currentMode) sendCmd('set_mode', { mode });
+  });
+});
+
+// ============================== Liquid Selector ==============================
+const liquidNames = ['水', '粘稠', '有机', '自定义'];
+function buildLiquidRow(idx) {
+  const row = $('#liquidRow');
+  row.innerHTML = '';
+  liquidNames.forEach((name, i) => {
+    const btn = document.createElement('div');
+    btn.className = 'liquid-btn' + (i === idx ? ' active' : '');
+    btn.textContent = name;
+    btn.onclick = () => sendCmd('set_liquid', { index: i });
+    row.appendChild(btn);
+  });
+}
+buildLiquidRow(0);
+
+// ============================== Panels ==============================
+function showPanel(name) {
+  const panels = { calib: 'panelCalib', preset: 'panelPreset', wifi: 'panelWifi' };
+  Object.values(panels).forEach(id => { if ($('#' + id)) $('#' + id).style.display = 'none'; });
+  const target = panels[name];
+  if (target && $('#' + target)) {
+    const el = $('#' + target);
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+  }
+}
+
+// Calibration helpers
+function updateCalibSteps(step) {
+  // step: -1=IDLE, 0=SELECT_LIQUID, 1=SET_VOL, 2=RUN, 3=MEASURE, 4=RESULT, 5=SETTINGS
+  currentStep = step;
+  $$('.calib-step').forEach((el, i) => {
+    el.classList.remove('active', 'done');
+    if (i < step) el.classList.add('done');
+    else if (i === step) el.classList.add('active');
+  });
+
+  const content = $('#calibContent');
+  const buttons = $('#calibButtons');
+
+  if (step < 0) {
+    content.innerHTML = '<p style="color:var(--text2);font-size:13px">点击 "开始校准" 或发送 calib_enter 启动。</p>';
+    buttons.style.display = 'none';
+    return;
+  }
+
+  buttons.style.display = '';
+  const b1 = $('#calibBtn1'), b2 = $('#calibBtn2');
+
+  switch (step) {
+    case 0: // SELECT_LIQUID
+      content.innerHTML = '<p style="color:var(--text2)">第 1/5 步: 选择要校准的液体</p>';
+      b1.textContent = '选水'; b1.onclick = () => sendCmd('calib_select_liquid', {index:0});
+      b2.textContent = '选粘稠'; b2.onclick = () => sendCmd('calib_select_liquid', {index:1});
+      break;
+    case 1: // SET_VOL
+      content.innerHTML = '<p style="color:var(--text2)">第 2/5 步: 设定校准体积</p><input type="number" id="calibVol" value="10" step="0.1" min="0.1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:14px;margin-top:6px">';
+      b1.textContent = '确认体积'; b1.onclick = () => sendCmd('calib_set_vol', {value:parseFloat($('#calibVol')?.value||10)});
+      b2.textContent = '跳过'; b2.onclick = () => sendCmd('calib_abort');
+      break;
+    case 2: // RUN
+      content.innerHTML = '<p style="color:var(--text2)">第 3/5 步: 泵正在运行中...</p><p style="color:var(--accent);font-size:14px">可手动停止或等它自动完成</p>';
+      b1.textContent = '启动运行'; b1.onclick = () => sendCmd('calib_start_run');
+      b2.textContent = '手动停止'; b2.onclick = () => sendCmd('calib_stop_run');
+      break;
+    case 3: // MEASURE
+      content.innerHTML = '<p style="color:var(--text2)">第 4/5 步: 用量筒读取实际体积</p><input type="number" id="calibActual" value="10" step="0.1" min="0.1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:14px;margin-top:6px"><span class="unit">mL</span>';
+      b1.textContent = '确认读数'; b1.onclick = () => sendCmd('calib_measure', {value:parseFloat($('#calibActual')?.value||10)});
+      b2.textContent = '放弃'; b2.onclick = () => sendCmd('calib_abort');
+      break;
+    case 4: // RESULT
+      content.innerHTML = '<p style="color:var(--text2)">第 5/5 步: 确认新校准值</p><p style="color:var(--accent);font-size:14px" id="calibResult">计算中...</p>';
+      b1.textContent = '✅ 确认保存'; b1.onclick = () => sendCmd('calib_save');
+      b2.textContent = '❌ 放弃'; b2.onclick = () => sendCmd('calib_abort');
+      break;
+    case 5: // SETTINGS
+      content.innerHTML = '<p style="color:var(--text2)">高级设置 — 可在泵的键盘上操作</p><p style="color:var(--text3);font-size:12px">回吸量 / 管路寿命 / 液体选择</p>';
+      b1.textContent = '完成'; b1.onclick = () => sendCmd('calib_settings_done');
+      b2.textContent = '退出'; b2.onclick = () => sendCmd('calib_abort');
+      break;
+  }
+}
+
+// Preset slots
+function buildPresetSlots() {
+  const row = $('#presetSlots');
+  row.innerHTML = '';
+  for (let i = 0; i < 4; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-action';
+    btn.textContent = '方案 ' + (i + 1);
+    btn.onclick = () => sendCmd('preset_load', {slot: i});
+    btn.oncontextmenu = e => { e.preventDefault(); sendCmd('preset_save', {slot: i}); };
+    row.appendChild(btn);
+  }
+  row.innerHTML += '<span style="font-size:11px;color:var(--text3);width:100%;text-align:center">左键加载 | 右键/长按保存</span>';
+}
+buildPresetSlots();
+
+// ============================== WiFi Settings ==============================
+function wifiSave() {
+  const ssid = $('#wifiSSID').value.trim();
+  const pass = $('#wifiPass').value;
+  fetch('/api/wifi', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ssid, pass, mode: ssid ? 1 : 0})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      toast('WiFi 配置已保存，正重启网络...');
+      // 通知泵重启 WiFi
+      socket.send(JSON.stringify({cmd:'wifi_restart', params:{}}));
+    } else {
+      toast('保存失败', true);
+    }
+  });
+}
+
+function wifiScan() {
+  fetch('/api/scan').then(r => r.json()).then(d => {
+    if (d.scanning) {
+      $('#wifiScanResult').textContent = '扫描中... 请稍后再试';
+      return;
+    }
+    const nets = d.networks || [];
+    if (nets.length === 0) {
+      $('#wifiScanResult').textContent = '未发现 WiFi 网络';
+      return;
+    }
+    $('#wifiScanResult').innerHTML = nets.map(n =>
+      `<div style="padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)" onclick="$('#wifiSSID').value='${n.ssid}'">
+        ${n.ssid} ${n.secure?'🔒':''} <span style="color:var(--text3)">${n.rssi}dBm</span>
+      </div>`
+    ).join('');
+  }).catch(() => {
+    // Fallback: request scan trigger
+    fetch('/api/scan');
+    $('#wifiScanResult').textContent = '扫描触发中... 2秒后再试';
+  });
+}
+
+// ============================== Toast ==============================
+let toastTimer;
+function toast(msg, isError = false) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ============================== Init ==============================
+connect();
+// Refresh state periodically (backup in case WebSocket telemetry misses)
+setInterval(() => { if (socket && socket.readyState === 1) sendCmd('get_state'); }, 3000);
+</script>
+</body>
+</html>

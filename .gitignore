@@ -6,13 +6,31 @@ build/
 *.map
 *.o
 
+# PlatformIO
+.pio/
+
 # macOS
 .DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # Python
 __pycache__/
 *.pyc
+
+# Secrets / local config
+*.local.*
+secrets.h
+wifi_config.h
+
+# Dependencies
+libraries/
