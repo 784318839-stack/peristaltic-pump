@@ -2,6 +2,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。
 
+> **v2.1** (2026-07-06) — Web UI 改用 HTTP 轮询（取代 WebSocket），修复压缩后 `//` 注释破坏 JS 的 bug。
 > **v2.0** — 全面转向远程控制：WiFi Web UI + BLE UART + USB Serial，OLED/键盘已停用。
 
 ---
@@ -13,7 +14,7 @@
 | **WiFi Web UI** | 手机/PC 浏览器直连，PWA 可添加到桌面 |
 | **BLE UART** | Nordic UART Service，设备名 `PumpCtrl-XXXX` |
 | **USB Serial** | 通过 USB-CDC 串口发送 JSON 命令 (115200bps) |
-| **Hardware UART** | GPIO48=RX, 47=TX, 115200bps — USB-TTL 直连 PC，XToys 集成 |
+| **Hardware UART** | GPIO21=RX, 47=TX, 115200bps — USB-TTL 直连 PC，XToys 集成 |
 
 四通道共用同一套 **JSON 命令协议**，可同时使用。
 
@@ -55,13 +56,14 @@
 | 主控 | ESP32-S3-WROOM-1-N16 (16MB Flash) |
 | 泵头 | YZ1515 (工业级, 100×80×80mm) |
 | 电机 | 42/57 步进电机 + 驱动器 |
-| 蜂鸣器 | 无源蜂鸣器 GPIO1 |
+| 蜂鸣器 | 无源蜂鸣器 GPIO5 |
+| WS2812 LED | 状态指示灯 (待机绿/运行蓝/暂停琥珀/完成绿闪) |
 | 显示屏 | SH1106 OLED 128×64 I2C *(v2.0 已停用)* |
 | 键盘 | 4×4 矩阵键盘 *(v2.0 已停用)* |
 
 ---
 
-## 功能清单 (16 项)
+## 功能清单 (17 项)
 
 ### 泵送模式
 
@@ -96,12 +98,13 @@
 
 ### 反馈
 
-14. **蜂鸣器** — 7 种音效（按键/确认/取消/启动/暂停/完成/断电）
-15. **实时遥测** — `/api/status` 返回完整 JSON（状态/模式/参数/进度/WiFi 信息）
+14. **非阻塞蜂鸣器** — 7 种音效（按键/确认/取消/启动/暂停/完成/断电）
+15. **WS2812 状态灯** — 颜色随泵状态变化，管路寿命告警红灯闪烁
+16. **实时遥测** — `/api/status` 返回完整 JSON（状态/模式/参数/进度/WiFi 信息）
 
 ### 高级
 
-16. **多客户端并发** — FreeRTOS 命令队列，WiFi + BLE + USB 三通道同时工作，线程安全
+17. **多客户端并发** — FreeRTOS 命令队列，WiFi + BLE + USB 三通道同时工作，线程安全
 
 ---
 
@@ -113,7 +116,7 @@
 
 ```
 PC (USB) → USB-TTL 转接板 → ESP32
-           TX ────────────→ GPIO 48 (RX)
+           TX ────────────→ GPIO 21 (RX)
            RX ────────────← GPIO 47 (TX)
            GND ──────────── GND
 ```
@@ -134,7 +137,7 @@ PC (USB) → USB-TTL 转接板 → ESP32
 | 显示 | 实时状态、已出 mL、进度%、累计 mL、管路寿命% |
 | 自动化 | 滑块拖动即时同步参数、每秒轮询遥测、停止时自动停泵 |
 
-> 脚本文件: `蠕动泵_XToys脚本.js`
+> 脚本文件: `xtoys_script.js`
 
 ---
 
@@ -237,7 +240,8 @@ Buzzer: 5
 I2C SDA: 21  I2C SCL: 7    (OLED — v2.0 已停用)
 Keypad Rows: 4, 5, 13, 42   (键盘 — v2.0 已停用)
 Keypad Cols: 38, 39, 40, 47
-UART1 RX: 48    TX: 47      (硬件串口 — XToys / PC 直连)
+UART1 RX: 21    TX: 47      (硬件串口 — XToys / PC 直连)
+WS2812: 48                   (RGB 状态指示灯)
 ```
 
 ### 安全引脚 (已验证)
@@ -255,21 +259,26 @@ UART1 RX: 48    TX: 47      (硬件串口 — XToys / PC 直连)
 
 ```
 peristaltic_pump/
-├── peristaltic_pump.ino      # 主程序 (~2135 行)
+├── peristaltic_pump.ino      # 主程序
 ├── pump_shared.h             # 共享类型 & extern 声明
+├── pump_core.h/cpp           # 泵控制核心 (启停/暂停/恢复/喷射/校准)
+├── eeprom_store.h/cpp        # EEPROM 持久化存储
 ├── wifi_manager.h/cpp        # WiFi 管理 (SoftAP/Station + EEPROM)
 ├── bluetooth_manager.h/cpp   # BLE UART (NimBLE / Nordic UART Service)
 ├── web_handlers.h/cpp        # HTTP 服务 (路由 / 内嵌页面)
-├── web_ui_gen.h              # Web UI (内嵌 HTML/CSS/JS, ~396 行 gzip 友好)
-├── command_protocol.h/cpp    # JSON 命令协议 (解析/路由/遥测, ~558 行)
-├── serial_commands.h/cpp     # USB 串口命令入口
+├── index.html                # Web UI 源文件 (编辑入口)
+├── web_ui_gen.h              # Web UI 生成文件 (由 generate_web_ui.py 自动生成)
+├── command_protocol.h/cpp    # JSON 命令协议 (解析/路由/遥测)
+├── serial_commands.h/cpp     # USB 串口 + 硬件 UART 命令入口
+├── buzzer.h/cpp              # 非阻塞蜂鸣器驱动
+├── led.h/cpp                 # WS2812 状态指示灯
 ├── pump_chinese_font.h       # 中文字库 (SimHei 14px, 124 字 — OLED 已停用)
-├── generate_font.py          # 字库生成脚本
-├── build_web_ui.py           # Web UI 构建脚本 → web_ui_gen.h
+├── pump_cli.py               # Python CLI 控制工具
+├── generate_web_ui.py        # Web UI 构建脚本: index.html → web_ui_gen.h
+├── build_web_ui.py           # Web UI 备选构建脚本
+├── xtoys_script.js           # XToys 平台集成脚本
 ├── strip_chinese.py          # 中文字符串提取脚本
 ├── strip_kb_oled.py          # 剥离键盘/OLED 代码脚本
-├── apply_cn.py               # 中文字库应用脚本
-├── gen_font.py               # 旧版字库生成
 └── README.md
 ```
 
