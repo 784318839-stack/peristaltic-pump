@@ -12,6 +12,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <EEPROM.h>
+#include <esp_wifi.h>
 
 // ----- EEPROM 偏移量 -----
 #define WIFI_EEPROM_BASE   184
@@ -40,9 +41,10 @@ void initWiFi() {
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
-  // 4. 配置 SoftAP
+  // 4. 配置 SoftAP (降低发射功率降温: 默认 20dBm -> 8dBm)
   WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);
   WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 2);
+  esp_wifi_set_max_tx_power(32);  // 8dBm ≈ 6mW, 家庭室内足够
   delay(300);
   localIP = WiFi.softAPIP();
 

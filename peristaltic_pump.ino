@@ -130,6 +130,11 @@ AccelStepper stepper( AccelStepper::DRIVER, STEP_PIN, DIR_PIN );
 void setup() {
   Serial.begin( 115200 );
   delay( 2000 );
+
+  // Step -1 : 降频降温 (240MHz -> 160MHz, 泵控制完全够用)
+  setCpuFrequencyMhz( 160 );
+  Serial.printf( "[SETUP] CPU: %d MHz\n", getCpuFrequencyMhz() );
+
   Serial.println( "[SETUP] start" );
 
   // Step 0 : PSRAM 检测 & 初始化 (ESP32-S3-N16R8, 8MB Octal PSRAM)
