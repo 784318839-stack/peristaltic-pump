@@ -107,10 +107,7 @@ static void handleRequest(WiFiClient &client, const String &method,
 
   // GET /api/status -> 遥测
   if (method == "GET" && path.startsWith("/api/status")) {
-    const char* json = buildTelemetryJson();
-    String resp = "{\"type\":\"telemetry\",";
-    resp += (json + 1);  // 跳过起始 '{'
-    sendJson(client, 200, resp.c_str());
+    sendJson(client, 200, buildTelemetryJson());
     return;
   }
 
