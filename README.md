@@ -2,6 +2,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。
 
+> **v2.2** (2026-07-07) — ESP32-S3-N16R8 8MB PSRAM 全面启用，WiFi AP+STA 双模连接家里路由器，多项 UI 优化和热管理。
 > **v2.1** (2026-07-06) — Web UI 改用 HTTP 轮询（取代 WebSocket），修复压缩后 `//` 注释破坏 JS 的 bug。
 > **v2.0** — 全面转向远程控制：WiFi Web UI + BLE UART + USB Serial，OLED/键盘已停用。
 
@@ -22,13 +23,16 @@
 
 ## WiFi 网络
 
-- **默认模式**: SoftAP，手机/PC 直连，无需路由器
-  - SSID: `PumpCtrl-XXXX`（XXXX = MAC 后 4 位）
-  - IP: `192.168.4.1`
-- **可选模式**: Station + SoftAP 回退
-  - 可通过 Web UI 或 API 配置路由器 WiFi
-  - Station 失败自动回退到 SoftAP
+- **双模启动**: WIFI_AP_STA 同时运行，无需模式切换
+  - SoftAP 始终可用: `PumpCtrl-XXXX`（密码 12345678）
+  - IP: `http://192.168.4.1`（直连）或 `http://pump.local`（mDNS）
+- **STA 连接家里 WiFi**: Web UI → WiFi 设置 → 输入 SSID/密码 → 保存
+  - 连接成功后页面弹出 `✅ WiFi 已连接` 提示
+  - header 实时显示可访问地址 `http://STA_IP | http://pump.local`
+  - STA 失败不影响 SoftAP，30s 超时自动放弃
   - 配置保存在 EEPROM，掉电不丢失
+- **WiFi 扫描**: 同步扫描 (~1 秒)，点击 SSID 自动填入
+- **密码可见**: 👁 按钮切换明文/密文
 
 ---
 
@@ -44,8 +48,11 @@
 - 📐 **校准向导** — 6 步引导式校准流程
 - 💾 **方案预设** — 4 槽位加载/保存
 - 🚿 **预灌快排** — 全速排空管路
-- 📡 **WiFi 管理** — 扫描网络、配置连接
+- 📡 **WiFi 管理** — 扫描网络、配置连接、密码明文切换
 - 📈 **管路寿命** — 累计流量百分比显示
+- 💾 **PSRAM 监控** — 页面底部实时显示 PSRAM 和堆内存使用
+- 🔗 **访问地址** — header 显示当前可访问 URL (IP + mDNS)
+- ✅ **WiFi 状态** — STA 连接成功自动弹出提示
 
 ---
 
@@ -53,7 +60,7 @@
 
 | 部件 | 型号 / 规格 |
 |---|---|
-| 主控 | ESP32-S3-WROOM-1-N16 (16MB Flash) |
+| 主控 | ESP32-S3-WROOM-1-**N16R8** (16MB Flash + **8MB Octal PSRAM**) |
 | 泵头 | YZ1515 (工业级, 100×80×80mm) |
 | 电机 | 42/57 步进电机 + 驱动器 |
 | 蜂鸣器 | 无源蜂鸣器 GPIO5 |
@@ -153,7 +160,8 @@ PC (USB) → USB-TTL 转接板 → ESP32
 | GET | `/api/status` | 完整遥测 JSON |
 | GET | `/api/cmd?c=<json>` | 发送命令 |
 | POST | `/api/wifi` | 配置 WiFi 连接 |
-| GET | `/api/scan` | 扫描附近 WiFi 网络 |
+| GET | `/api/scan` | 扫描附近 WiFi 网络 (同步, ~1s) |
+| GET | `/api/info` | 网络状态 (IP/模式/MAC/mDNS) |
 
 ### 命令列表
 
@@ -204,7 +212,11 @@ PC (USB) → USB-TTL 转接板 → ESP32
   "calibStep": 0,
   "wifiMode": "ap",
   "wifiIP": "192.168.4.1",
-  "wifiClients": 1
+  "wifiClients": 1,
+  "psramFree": 7936,
+  "psramTotal": 8192,
+  "heapFree": 265,
+  "heapTotal": 320
 }
 ```
 
@@ -224,11 +236,22 @@ Mode:   MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 | 选项 | 值 |
 |---|---|
 | Board | **ESP32S3 Dev Module** |
-| PSRAM | **Disabled** |
+| PSRAM | **OPI PSRAM** (Octal SPI, N16R8) |
 | USB CDC On Boot | **Disabled** |
 | Partition Scheme | **Huge APP (3MB No OTA/1MB SPIFFS)** |
 | Flash Size | **16MB (128Mb)** |
+| CPU Frequency | **160 MHz** (降频降温) |
 | 串口波特率 | **115200** |
+
+### 内存布局
+
+| 存储器 | 容量 | 用途 |
+|--------|------|------|
+| Flash | 16 MB | 固件 (1.2MB) + SPIFFS |
+| 内部 SRAM | ~320 KB | WiFi/BLE 协议栈、FreeRTOS 任务栈、关键数据 |
+| **PSRAM** | **8 MB** | 遥测/命令/串口缓冲区、FreeRTOS 队列、大 JSON 解析 |
+
+静态缓冲区（`telemetryBuf`/`responseBuf`/`serialBuffer`/`hwUartBuf`）已全部移到 PSRAM heap，内部 SRAM 从 58.3KB 降至 56.0KB。
 
 ---
 
@@ -293,6 +316,40 @@ peristaltic_pump/
 | [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) | BLE UART |
 | [U8g2](https://github.com/olikraus/u8g2) | OLED 图形库 *(v2.0 已停用)* |
 | [Keypad](https://github.com/Chris--A/Keypad) | 矩阵键盘 *(v2.0 已停用)* |
+
+---
+
+## 更新日志
+
+### v2.2 (2026-07-07)
+
+**PSRAM 全面启用:**
+- ESP32-S3-N16R8 8MB Octal PSRAM 启用 (OPI PSRAM)
+- 静态缓冲区全移到 PSRAM: 遥测/响应/USB串口/HW UART (~2.2KB 内部 SRAM 节省)
+- FreeRTOS 命令队列 >4KB 自动分配 PSRAM
+- Web UI 底部显示 PSRAM 和堆内存实时用量
+
+**WiFi STA 双模:**
+- `initWiFi()` 重写: WIFI_AP_STA 双模直接启动，避免模式切换 LWIP 冲突
+- 后台连接家里 WiFi (30s 超时)，SoftAP 始终保留作 fallback
+- 新增 `POST /api/wifi` (保存 WiFi 配置到 EEPROM)
+- 新增 `GET /api/scan` (同步扫描, ~1s, 泵运行时拒绝)
+- 新增 `GET /api/info` (网络状态)
+- STA 连接成功自动弹出 toast 提示
+- 密码输入框 👁 明文切换
+- Header 显示可访问地址 `http://IP | http://pump.local`
+- 修复 mDNS 重复注册 'Service already exists'
+- 修复 `/api/status` 返回坏 JSON 导致页面一直"未连接"
+
+**热管理:**
+- CPU 从 240MHz 降至 160MHz
+- WiFi TX 功率从 20dBm 降至 8dBm
+
+**修复:**
+- DONE 状态可重新启动 (不再卡 'Pump not idle')
+- `set_mode` 增加 `resetPump()` 确保模式切换后状态干净
+- Web UI 液体选择行从遥测同步更新 (之前始终高亮液体 0)
+- 喷射模式 UI: 按钮放入 flex 容器、合并为"应用全部"、运行状态显示
 
 ---
 
