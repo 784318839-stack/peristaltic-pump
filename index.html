@@ -140,8 +140,10 @@ button:active{transform:scale(.95);opacity:.8}
       <div class="input-row">
         <label>体积</label><input type="number" id="inVolume" value="10" step="0.1" min="0.1" max="999.9"><span class="unit">mL</span>
       </div>
-      <button class="btn-action" onclick="sendCmd('set_flow',{value:parseFloat($('#inFlow').value)})">应用流量</button>
-      <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inVolume').value)})">应用体积</button>
+      <div class="btn-row">
+        <button class="btn-action" onclick="sendCmd('set_flow',{value:parseFloat($('#inFlow').value)})">应用流量</button>
+        <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inVolume').value)})">应用体积</button>
+      </div>
     </div>
     <div id="paramTime" style="display:none">
       <div class="input-row">
@@ -150,8 +152,10 @@ button:active{transform:scale(.95);opacity:.8}
       <div class="input-row">
         <label>时间</label><input type="number" id="inTimeSec" value="30" step="1" min="1" max="86400"><span class="unit">秒</span>
       </div>
-      <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inTimeVol').value)})">应用体积</button>
-      <button class="btn-action" onclick="sendCmd('set_time',{value:parseFloat($('#inTimeSec').value)})">应用时间</button>
+      <div class="btn-row">
+        <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inTimeVol').value)})">应用体积</button>
+        <button class="btn-action" onclick="sendCmd('set_time',{value:parseFloat($('#inTimeSec').value)})">应用时间</button>
+      </div>
     </div>
     <div id="paramJet" style="display:none">
       <div class="jet-grid">
@@ -160,10 +164,9 @@ button:active{transform:scale(.95);opacity:.8}
         <div><label>流量 mL/min</label><input type="number" id="inJetFlow" value="200" step="1" min="10" max="2000"></div>
         <div><label>压力 1-10</label><input type="number" id="inJetPres" value="5" step="1" min="1" max="10"></div>
       </div>
-      <button class="btn-action" onclick="sendCmd('set_jet_vol',{value:parseFloat($('#inJetVol').value)})">应用单次量</button>
-      <button class="btn-action" onclick="sendCmd('set_jet_interval',{value:parseFloat($('#inJetInt').value)})">应用间隔</button>
-      <button class="btn-action" onclick="sendCmd('set_jet_flow',{value:parseFloat($('#inJetFlow').value)})">应用流量</button>
-      <button class="btn-action" onclick="sendCmd('set_jet_pressure',{value:parseFloat($('#inJetPres').value)})">应用压力</button>
+      <div class="btn-row">
+        <button class="btn-action" onclick="applyJetParams()">应用全部</button>
+      </div>
     </div>
   </div>
 
@@ -336,6 +339,22 @@ function updateUI(d) {
   $('#stTarget').textContent = d.targetVol.toFixed(1);
   $('#progressBar').style.width = d.progress + '%';
   $('#stProgress').textContent = d.progress + '%';
+  /* JET 模式运行状态 */
+  var jetInfo = $('#stJetInfo');
+  if (d.mode === 'JET' && d.state !== 'IDLE' && d.state !== 'DONE') {
+    if (!jetInfo) {
+      jetInfo = document.createElement('div');
+      jetInfo.id = 'stJetInfo';
+      jetInfo.style.cssText = 'grid-column:1/-1;font-size:13px;color:var(--accent);text-align:center;padding:4px;margin-top:4px;background:var(--accent2);border-radius:6px';
+      $('#stDisp').parentElement.parentElement.appendChild(jetInfo);
+    }
+    var isSquirting = d.state === 'RUNNING' && d.progress < 100;
+    jetInfo.textContent = '喷射 #' + (d.jetCount + 1) + (isSquirting ? ' ● 喷液中' : ' ○ 等待中');
+    jetInfo.style.display = '';
+  } else if (jetInfo) {
+    jetInfo.style.display = 'none';
+  }
+
   $('#stTotal').textContent = d.totalDispensed.toFixed(0);
   $('#stTube').textContent = d.tubePct;
   $('#stMotor').textContent = d.stepperEnabled ? '使能' : '断电';
@@ -475,6 +494,13 @@ function updateCalibSteps(step) {
       b2.textContent = '退出'; b2.onclick = () => sendCmd('calib_abort');
       break;
   }
+}
+
+function applyJetParams() {
+  sendCmd('set_jet_vol', {value: parseFloat($('#inJetVol').value)});
+  sendCmd('set_jet_interval', {value: parseFloat($('#inJetInt').value)});
+  sendCmd('set_jet_flow', {value: parseFloat($('#inJetFlow').value)});
+  sendCmd('set_jet_pressure', {value: parseFloat($('#inJetPres').value)});
 }
 
 function buildPresetSlots() {
