@@ -87,6 +87,7 @@ button:active{transform:scale(.95);opacity:.8}
     <span id="connText">未连接</span>
   </div>
   <h1>蠕动泵</h1>
+  <div style="font-size:11px;color:var(--accent);text-align:right" id="pumpUrl"></div>
   <div style="font-size:12px;color:var(--text3)" id="wifiInfo"></div>
 </header>
 
@@ -405,6 +406,11 @@ function updateUI(d) {
     if (d.wifiIP) info += ' | ' + d.wifiIP;
     if (d.wifiClients !== undefined && d.wifiClients > 0) info += ' | 📶' + d.wifiClients;
     $('#wifiInfo').textContent = info;
+    // 可访问地址
+    var url = d.wifiMode === 'sta+ap' && d.wifiIP
+      ? 'http://' + d.wifiIP + '  |  http://pump.local'
+      : 'http://192.168.4.1';
+    $('#pumpUrl').textContent = url;
     // STA 连接成功提示
     if (d.wifiMode === 'sta+ap' && lastWifiMode !== 'sta+ap') {
       toast('✅ WiFi 已连接: ' + (d.wifiIP || ''));
