@@ -217,6 +217,7 @@ button:active{transform:scale(.95);opacity:.8}
     </div>
     <div class="input-row">
       <label>密码</label><input type="password" id="wifiPass" placeholder="WiFi 密码">
+      <button class="btn-sm" onclick="togglePass()" style="min-width:44px;padding:8px;font-size:16px" title="显示/隐藏密码">👁</button>
     </div>
     <div class="btn-row">
       <button class="btn-action" onclick="wifiSave()">保存配置</button>
@@ -250,6 +251,7 @@ const MAX_RETRIES = 30;
 let currentMode = 'VOLUME';
 let currentState = 'IDLE';
 let currentLiquid = 0;
+let lastWifiMode = 'ap';
 let currentStep = -1;
 
 function safeSetInput(id, val) {
@@ -403,6 +405,11 @@ function updateUI(d) {
     if (d.wifiIP) info += ' | ' + d.wifiIP;
     if (d.wifiClients !== undefined && d.wifiClients > 0) info += ' | 📶' + d.wifiClients;
     $('#wifiInfo').textContent = info;
+    // STA 连接成功提示
+    if (d.wifiMode === 'sta+ap' && lastWifiMode !== 'sta+ap') {
+      toast('✅ WiFi 已连接: ' + (d.wifiIP || ''));
+    }
+    lastWifiMode = d.wifiMode;
   }
 
   if (d.liquidIdx !== undefined && d.liquidIdx !== currentLiquid) {
@@ -517,6 +524,11 @@ function buildPresetSlots() {
   row.innerHTML += '<span style="font-size:11px;color:var(--text3);width:100%;text-align:center">左键加载 | 右键/长按保存</span>';
 }
 buildPresetSlots();
+
+function togglePass() {
+  var el = $('#wifiPass');
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
 
 function wifiSave() {
   const ssid = $('#wifiSSID').value.trim();
