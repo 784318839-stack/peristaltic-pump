@@ -138,6 +138,19 @@ bool loadWiFiConfig(WiFiConfig& cfg) {
     cfg.pass[i] = EEPROM.read(WIFI_EEPROM_BASE + 34 + i);
   }
   cryptData((uint8_t*)cfg.pass, 64);  // XOR 解密 (与加密同一操作)
+
+  // 完整性校验: 解密后必须是可打印 ASCII 或空字符
+  bool passValid = true;
+  for (int i = 0; i < 64; i++) {
+    uint8_t c = (uint8_t)cfg.pass[i];
+    if (c != 0 && (c < 0x20 || c > 0x7E)) { passValid = false; break; }
+  }
+  if (!passValid) {
+    // 密钥不匹配 (MAC 改变 / 数据损坏) → 清空配置, 回退 SoftAP
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mode = WIFI_MODE_AP_ONLY;
+    return false;
+  }
   cfg.pass[63] = '\0';
 
   cfg.mode = EEPROM.read(WIFI_EEPROM_BASE + 98);
