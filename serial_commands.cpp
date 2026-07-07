@@ -4,28 +4,43 @@
  * 帧格式 : 换行分隔的 JSON ( 兼容 \n , \r\n )
  * 最大单帧 : 512 字节
  *
- * PC 端用法 :
- *   echo '{"cmd":"start"}' > /dev/ttyACM0     ( Linux )
- *   echo {"cmd":"start"} > COM3                ( Windows )
- *   Python: s.write( b'{"cmd":"start"}\n' )
+ * 缓冲区分配在 PSRAM 中, 减少内部 SRAM 占用
  ******************************************************************************/
 #include "serial_commands.h"
 #include "command_protocol.h"
 #include "pump_shared.h"
+#include <esp_heap_caps.h>
 
 #define SERIAL_BAUD 115200
 #define SERIAL_BUF_SIZE 512
 
-static char serialBuffer[SERIAL_BUF_SIZE];
-static int  serialLen = 0;
+// PSRAM 优先分配的缓冲区
+static char* serialBuffer = nullptr;
+static int   serialLen = 0;
+
+static char* hwUartBuf = nullptr;
+static int   hwUartLen = 0;
+
+// ---- 初始化 ----
+
+void initSerialBuffers() {
+  serialBuffer = (char*)heap_caps_malloc(SERIAL_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!serialBuffer) serialBuffer = (char*)malloc(SERIAL_BUF_SIZE);
+  if (serialBuffer) serialBuffer[0] = '\0';
+
+  hwUartBuf = (char*)heap_caps_malloc(SERIAL_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!hwUartBuf) hwUartBuf = (char*)malloc(SERIAL_BUF_SIZE);
+  if (hwUartBuf) hwUartBuf[0] = '\0';
+}
 
 void initSerialCommands() {
   unsigned long start = millis();
   while ( !Serial && millis() - start < 2000 ) { delay( 10 ); }
-  Serial.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.0\"}" );
+  Serial.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.1\"}" );
 }
 
 void processSerialCommands() {
+  if (!serialBuffer) return;
   while ( Serial.available() ) {
     char c = Serial.read();
     if ( c == '\n' || c == '\r' ) {
@@ -43,20 +58,19 @@ void processSerialCommands() {
 }
 
 // ============================================================================
-//  硬件 UART1 ( GPIO 21 = RX , 47 = TX ) — PC 直连 , 协议与 USB CDC 一致
+//  硬件 UART1 ( GPIO 21 = RX , 47 = TX )
 // ============================================================================
 static HardwareSerial hwUart( 1 );
-static char hwUartBuf[512];
-static int  hwUartLen = 0;
 
 void initHardwareUart() {
   hwUart.begin( 115200, SERIAL_8N1, HW_UART_RX, HW_UART_TX );
   unsigned long start = millis();
   while ( !hwUart && millis() - start < 1000 ) { delay( 5 ); }
-  hwUart.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.0\",\"port\":\"UART1\"}" );
+  hwUart.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.1\",\"port\":\"UART1\"}" );
 }
 
 void processHardwareUart() {
+  if (!hwUartBuf) return;
   while ( hwUart.available() ) {
     char c = hwUart.read();
     if ( c == '\n' || c == '\r' ) {
@@ -67,7 +81,7 @@ void processHardwareUart() {
         if ( response && response[0] ) hwUart.println( response );
         hwUartLen = 0;
       }
-    } else if ( hwUartLen < 511 ) {
+    } else if ( hwUartLen < SERIAL_BUF_SIZE - 1 ) {
       hwUartBuf[hwUartLen++] = c;
     }
   }

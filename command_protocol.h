@@ -47,8 +47,12 @@ void processCommandQueue();
 // 返回 JSON 响应字符串 (静态缓冲区, 下次调用覆盖)
 const char* parseAndExecute(const char* json);
 
+// 初始化 PSRAM 缓冲区 (必须在 setup 中调用)
+void initTelemetryBuffer();
+void initResponseBuffer();
+
 // 生成当前完整状态的 JSON 遥测字符串
-// 返回静态缓冲区, 调用方负责发送
+// 返回 PSRAM 缓冲区指针, 调用方负责发送
 const char* buildTelemetryJson();
 
 #endif // COMMAND_PROTOCOL_H

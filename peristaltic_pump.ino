@@ -132,6 +132,21 @@ void setup() {
   delay( 2000 );
   Serial.println( "[SETUP] start" );
 
+  // Step 0 : PSRAM 检测 & 初始化 (ESP32-S3-N16R8, 8MB Octal PSRAM)
+  if ( psramFound() ) {
+    size_t psramSize = ESP.getPsramSize();
+    Serial.printf( "[SETUP] PSRAM: %d KB (%.1f MB)\n", psramSize / 1024, psramSize / 1048576.0 );
+    Serial.printf( "[SETUP] Free PSRAM: %d KB\n", ESP.getFreePsram() / 1024 );
+  } else {
+    Serial.println( "[SETUP] PSRAM: NOT FOUND! Check Tools->PSRAM = OPI PSRAM" );
+  }
+  Serial.printf( "[SETUP] Free internal heap: %d KB\n", ESP.getFreeHeap() / 1024 );
+
+  // Step 0b : 初始化 PSRAM 优先分配的缓冲区 (省内部 SRAM)
+  initTelemetryBuffer();
+  initResponseBuffer();
+  initSerialBuffers();
+
   // Step 1 : EEPROM 加载参数
   EEPROM.begin( 512 );
   if ( !loadParams() ) saveParams();
@@ -185,6 +200,7 @@ void loop() {
   processHardwareUart();
   handleWebClients();
   handleBluetooth();
+  wifiMaintain();  // STA 连接状态维护 & mDNS
 
   // ---- 防滴回吸状态 ----
   if ( pumpState == ANTI_DRIP ) {

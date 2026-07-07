@@ -227,7 +227,9 @@ button:active{transform:scale(.95);opacity:.8}
     <span style="font-size:11px;color:var(--text3)">
       累计: <span id="stTotal">--</span> mL |
       管路: <span id="stTube">--</span>% |
-      电机: <span id="stMotor">--</span>
+      电机: <span id="stMotor">--</span><br>
+      PSRAM: <span id="stPsram">--</span> |
+      堆: <span id="stHeap">--</span>
     </span>
   </div>
 </main>
@@ -244,6 +246,7 @@ let retryCount = 0;
 const MAX_RETRIES = 30;
 let currentMode = 'VOLUME';
 let currentState = 'IDLE';
+let currentLiquid = 0;
 let currentStep = -1;
 
 function safeSetInput(id, val) {
@@ -336,6 +339,14 @@ function updateUI(d) {
   $('#stTotal').textContent = d.totalDispensed.toFixed(0);
   $('#stTube').textContent = d.tubePct;
   $('#stMotor').textContent = d.stepperEnabled ? '使能' : '断电';
+  if (d.psramTotal > 0) {
+    var psramUsed = d.psramTotal - d.psramFree;
+    $('#stPsram').textContent = psramUsed + '/' + d.psramTotal + ' KB';
+  }
+  if (d.heapTotal > 0) {
+    var heapPct = Math.round((d.heapTotal - d.heapFree) / d.heapTotal * 100);
+    $('#stHeap').textContent = heapPct + '%';
+  }
 
   $$('.mode-tab').forEach(t => {
     t.classList.toggle('active', t.dataset.mode === d.mode);
@@ -359,7 +370,7 @@ function updateUI(d) {
   const isPaused = d.state === 'PAUSED';
   const isDone = d.state === 'DONE';
 
-  $('#btnStart').disabled = !isIdle;
+  $('#btnStart').disabled = !(isIdle || isDone);
   $('#btnPause').disabled = !isRunning;
   $('#btnStop').disabled = !(isRunning || isPaused);
 
@@ -373,6 +384,11 @@ function updateUI(d) {
     if (d.wifiIP) info += ' | ' + d.wifiIP;
     if (d.wifiClients !== undefined && d.wifiClients > 0) info += ' | 📶' + d.wifiClients;
     $('#wifiInfo').textContent = info;
+  }
+
+  if (d.liquidIdx !== undefined && d.liquidIdx !== currentLiquid) {
+    currentLiquid = d.liquidIdx;
+    buildLiquidRow(d.liquidIdx);
   }
 }
 
@@ -494,11 +510,8 @@ function wifiSave() {
 }
 
 function wifiScan() {
+  $('#wifiScanResult').textContent = '扫描中...';
   fetch('/api/scan').then(r => r.json()).then(d => {
-    if (d.scanning) {
-      $('#wifiScanResult').textContent = '扫描中... 请稍后再试';
-      return;
-    }
     const nets = d.networks || [];
     if (nets.length === 0) {
       $('#wifiScanResult').textContent = '未发现 WiFi 网络';
@@ -510,8 +523,7 @@ function wifiScan() {
       </div>`
     ).join('');
   }).catch(() => {
-    fetch('/api/scan');
-    $('#wifiScanResult').textContent = '扫描触发中... 2秒后再试';
+    $('#wifiScanResult').textContent = '扫描失败，请重试';
   });
 }
 

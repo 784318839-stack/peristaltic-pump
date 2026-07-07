@@ -23,8 +23,12 @@ struct WiFiConfig {
 };
 
 // 初始化 WiFi (setup 中调用)
-// 尝试从 EEPROM 加载配置, 失败则使用默认 SoftAP
+// 直接从 WIFI_AP_STA 双模启动, SoftAP 始终可用
+// 如有已保存的 STA 配置, 后台连接家里 WiFi
 void initWiFi();
+
+// WiFi 维护 (loop 中调用, 处理 STA 连接状态)
+void wifiMaintain();
 
 // 获取当前 WiFi 状态 (用于遥测)
 // 返回 JSON 片段, 如: "ap", "192.168.4.1", 1

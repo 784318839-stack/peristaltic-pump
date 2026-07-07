@@ -10,6 +10,9 @@
 
 #include <Arduino.h>
 
+// 初始化串口 PSRAM 缓冲区 (必须在 setup 中调用, 先于 initSerialCommands)
+void initSerialBuffers();
+
 // 初始化 USB CDC 串口 ( 打印 READY 横幅 )
 void initSerialCommands();
 

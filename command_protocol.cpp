@@ -10,6 +10,7 @@
 #include "pump_shared.h"
 #include "wifi_manager.h"
 #include <ArduinoJson.h>
+#include <esp_heap_caps.h>
 
 // ============================================================================
 //                            FreeRTOS 命令队列
@@ -55,16 +56,23 @@ void processCommandQueue() {
 //                            JSON 解析 & 命令路由
 // ============================================================================
 
-// 静态响应缓冲区 ( parseAndExecute 返回指针指向此处 )
-static char responseBuf[512];
+// PSRAM 响应缓冲区
+static char* responseBuf = nullptr;
+#define RESPONSE_BUF_SIZE 512
+
+void initResponseBuffer() {
+  responseBuf = (char*)heap_caps_malloc(RESPONSE_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!responseBuf) responseBuf = (char*)malloc(RESPONSE_BUF_SIZE);
+  if (responseBuf) responseBuf[0] = '\0';
+}
 
 // 构造成功响应
 static const char* okResponse( const char* cmd, const char* dataJson = nullptr ) {
   if ( dataJson ) {
-    snprintf( responseBuf, sizeof( responseBuf ),
+    snprintf( responseBuf, RESPONSE_BUF_SIZE,
               "{\"type\":\"response\",\"id\":\"%s\",\"ok\":true,\"data\":%s}", cmd, dataJson );
   } else {
-    snprintf( responseBuf, sizeof( responseBuf ),
+    snprintf( responseBuf, RESPONSE_BUF_SIZE,
               "{\"type\":\"response\",\"id\":\"%s\",\"ok\":true}", cmd );
   }
   return responseBuf;
@@ -72,7 +80,7 @@ static const char* okResponse( const char* cmd, const char* dataJson = nullptr )
 
 // 构造错误响应
 static const char* errResponse( const char* cmd, const char* error ) {
-  snprintf( responseBuf, sizeof( responseBuf ),
+  snprintf( responseBuf, RESPONSE_BUF_SIZE,
             "{\"type\":\"response\",\"id\":\"%s\",\"ok\":false,\"error\":\"%s\"}", cmd, error );
   return responseBuf;
 }
@@ -82,7 +90,7 @@ const char* parseAndExecute( const char* json ) {
 
   DeserializationError err = deserializeJson( doc, json );
   if ( err ) {
-    snprintf( responseBuf, sizeof( responseBuf ),
+    snprintf( responseBuf, RESPONSE_BUF_SIZE,
               "{\"type\":\"response\",\"id\":\"?\",\"ok\":false,\"error\":\"JSON parse: %s\"}",
               err.c_str() );
     return responseBuf;
@@ -100,7 +108,7 @@ const char* parseAndExecute( const char* json ) {
   // ===================================================================
 
   if ( strcmp( cmd, "start" ) == 0 ) {
-    if ( pumpState != STATE_IDLE ) return errResponse( cmd, "Pump not idle" );
+    if ( pumpState != STATE_IDLE && pumpState != DONE ) return errResponse( cmd, "Pump not idle" );
     if ( pumpMode == MODE_JET ) startJetCycle();
     else startPump();
     return okResponse( cmd );
@@ -143,6 +151,7 @@ const char* parseAndExecute( const char* json ) {
     else
       return errResponse( cmd, "Invalid mode ( use VOLUME / TIME / JET )" );
     currentMenu = MAIN;
+    resetPump();   // clean state transition: reset stepper, volume, set state=IDLE
     markDirty();
     beepConfirm();
     return okResponse( cmd );
@@ -436,7 +445,7 @@ const char* parseAndExecute( const char* json ) {
 
   if ( strcmp( cmd, "get_state" ) == 0 ) {
     const char* telemetry = buildTelemetryJson();
-    snprintf( responseBuf, sizeof( responseBuf ),
+    snprintf( responseBuf, RESPONSE_BUF_SIZE,
               "{\"type\":\"response\",\"id\":\"get_state\",\"ok\":true,\"data\":%s}", telemetry );
     return responseBuf;
   }
@@ -454,9 +463,31 @@ const char* parseAndExecute( const char* json ) {
 //                                遥测
 // ============================================================================
 
-static char telemetryBuf[768];
+static char* telemetryBuf = nullptr;
+#define TELEMETRY_BUF_SIZE 1024
+
+// PSRAM 状态 (每次遥测刷新)
+static size_t psramFree = 0, psramTotal = 0;
+
+void initTelemetryBuffer() {
+  // 优先分配到 PSRAM
+  telemetryBuf = (char*)heap_caps_malloc(TELEMETRY_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!telemetryBuf) {
+    telemetryBuf = (char*)malloc(TELEMETRY_BUF_SIZE);  // 回退到内部 RAM
+  }
+  if (telemetryBuf) telemetryBuf[0] = '\0';
+}
 
 const char* buildTelemetryJson() {
+  if (!telemetryBuf) return "{}";
+
+  // 刷新 PSRAM 统计
+  psramTotal = ESP.getPsramSize();
+  psramFree  = ESP.getFreePsram();
+
+  // 内部 RAM 统计
+  size_t heapFree = ESP.getFreeHeap();
+  size_t heapTotal = 327680;  // ESP32-S3 内部 DRAM 总量
   const char* modeStr = ( pumpMode == MODE_TIME ) ? "TIME"
                       : ( pumpMode == MODE_JET )  ? "JET" : "VOLUME";
 
@@ -507,7 +538,7 @@ const char* buildTelemetryJson() {
   int wifiClients = 0;
   getWiFiStatus( wifiMode, wifiIP, wifiClients );
 
-  snprintf( telemetryBuf, sizeof( telemetryBuf ),
+  snprintf( telemetryBuf, TELEMETRY_BUF_SIZE,
     "{"
     "\"type\":\"telemetry\","
     "\"ts\":%lu,"
@@ -535,7 +566,11 @@ const char* buildTelemetryJson() {
     "\"calibStep\":%d,"
     "\"wifiMode\":\"%s\","
     "\"wifiIP\":\"%s\","
-    "\"wifiClients\":%d"
+    "\"wifiClients\":%d,"
+    "\"psramFree\":%d,"
+    "\"psramTotal\":%d,"
+    "\"heapFree\":%d,"
+    "\"heapTotal\":%d"
     "}",
     ( unsigned long )millis(),
     stateStr, menuStr, modeStr,
@@ -550,7 +585,11 @@ const char* buildTelemetryJson() {
     ( int )calibStep,
     wifiMode ? wifiMode : "ap",
     wifiIP ? wifiIP : "192.168.4.1",
-    wifiClients
+    wifiClients,
+    ( int )( psramFree / 1024 ),    // PSRAM free KB
+    ( int )( psramTotal / 1024 ),   // PSRAM total KB
+    ( int )( heapFree / 1024 ),     // internal heap free KB
+    ( int )( heapTotal / 1024 )     // internal heap total KB
   );
 
   return telemetryBuf;
