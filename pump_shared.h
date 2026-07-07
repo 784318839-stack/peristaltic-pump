@@ -15,7 +15,7 @@
 // ============================================================================
 
 enum PumpMode { MODE_VOLUME, MODE_TIME, MODE_JET };
-enum State    { STATE_IDLE, RUNNING, PAUSED, DONE, ANTI_DRIP };
+enum State    { STATE_IDLE, RUNNING, PAUSED, DONE, ANTI_DRIP, STALL_ERROR };
 enum Menu     { MAIN, SET_FLOW, SET_VOL, SET_TIME, CALIBRATE, PRIME,
                 SET_JET_VOL, SET_JET_INTERVAL, SET_JET_FLOW, SET_JET_PRESSURE,
                 SELECT_LIQUID, JET_OPTIONS, PRESET_LOAD };
@@ -76,6 +76,9 @@ extern float calibNewSPM;
 // ----- 浣胯兘 & 灞忎繚 -----
 extern bool         stepperEnabled;
 extern unsigned long lastStepperActivity;
+extern long          stallLastPosition;
+extern unsigned long stallCheckTime;
+#define STALL_TIMEOUT_MS  3000
 // extern unsigned long lastUserActivity; // disabled
 // extern bool         screensaverActive; // disabled
 

@@ -108,6 +108,7 @@ const char* parseAndExecute( const char* json ) {
   // ===================================================================
 
   if ( strcmp( cmd, "start" ) == 0 ) {
+    if ( pumpState == STALL_ERROR ) return errResponse( cmd, "Motor stalled! Reset first" );
     if ( pumpState != STATE_IDLE && pumpState != DONE ) return errResponse( cmd, "Pump not idle" );
     if ( pumpMode == MODE_JET ) startJetCycle();
     else startPump();
@@ -493,10 +494,11 @@ const char* buildTelemetryJson() {
 
   const char* stateStr = "IDLE";
   switch ( pumpState ) {
-    case RUNNING:   stateStr = "RUNNING";   break;
-    case PAUSED:    stateStr = "PAUSED";    break;
-    case DONE:      stateStr = "DONE";      break;
-    case ANTI_DRIP: stateStr = "ANTI_DRIP"; break;
+    case RUNNING:     stateStr = "RUNNING";     break;
+    case PAUSED:      stateStr = "PAUSED";      break;
+    case DONE:        stateStr = "DONE";        break;
+    case ANTI_DRIP:   stateStr = "ANTI_DRIP";   break;
+    case STALL_ERROR: stateStr = "STALL_ERROR"; break;
     default: break;
   }
 

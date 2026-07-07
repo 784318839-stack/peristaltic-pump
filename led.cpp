@@ -99,6 +99,12 @@ void led_tick() {
       dim = 0.3 + 0.5 * (1 + sin(g_phase * 0.3));
       pulse = true;
       break;
+
+    case STALL_ERROR:
+      // Fast red blink (alarm)
+      r = 120; g = 0; b = 0;
+      dim = (sin(g_phase * 0.3) > 0) ? 1.0 : 0.1;
+      break;
   }
 
   // Tube life warning overlay (>80%)

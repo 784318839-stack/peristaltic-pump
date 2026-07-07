@@ -105,9 +105,11 @@ float calibActualVol = 0;
 long  calibStepsRun  = 0;
 float calibNewSPM    = 0;
 
-// ----- 使能 & 超时 -----
+// ----- 使能 & 超时 & 堵转检测 -----
 bool         stepperEnabled      = true;
 unsigned long lastStepperActivity = 0;
+long          stallLastPosition    = 0;
+unsigned long stallCheckTime      = 0;
 
 // ----- 暂停断点 ( pump_core.cpp 引用 ) -----
 long          pausedRemainingSteps = 0;
@@ -295,6 +297,30 @@ void loop() {
       }
       stepper.run();
     }
+
+    // ---- 堵转检测 (位置超时) ----
+    // 跳过 JET 等待期 (jetSquirting=false 时电机不转)
+    bool motorShouldMove = !( pumpMode == MODE_JET && !jetSquirting );
+    if ( motorShouldMove ) {
+      long curPos = stepper.currentPosition();
+      if ( curPos != stallLastPosition ) {
+        stallLastPosition = curPos;
+        stallCheckTime    = millis();
+      } else if ( millis() - stallCheckTime > STALL_TIMEOUT_MS ) {
+        // 3 秒位置不变 → 堵转
+        stepper.stop();
+        stepper.disableOutputs();
+        stepperEnabled = false;
+        pumpState = STALL_ERROR;
+        beepCancel(); beepCancel(); beepCancel();  // 三连音报警
+      }
+    }
+  }
+
+  // ---- 堵转错误状态 ----
+  if ( pumpState == STALL_ERROR ) {
+    // LED 红色快闪由 led_update 根据状态处理
+    lastStepperActivity = millis();  // 防止空闲关使能冲突
   }
 
   // ---- DONE 音效 ( 跳变沿触发 ) ----
