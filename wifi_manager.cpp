@@ -13,10 +13,28 @@
 #include <ESPmDNS.h>
 #include <EEPROM.h>
 #include <esp_wifi.h>
+#include <esp_mac.h>
 
 // ----- EEPROM 偏移量 -----
 #define WIFI_EEPROM_BASE   184
 #define WIFI_EEPROM_MAGIC  0x5746   // "WF"
+
+// ----- 密码加密 (XOR with device MAC, 拆机读 EEPROM 也是乱码) -----
+static uint8_t  cryptKey[6];
+static bool     cryptKeyReady = false;
+
+static void initCryptKey() {
+  if (cryptKeyReady) return;
+  esp_read_mac(cryptKey, ESP_MAC_BASE);  // 出厂熔丝 MAC, 永不改变
+  cryptKeyReady = true;
+}
+
+static void cryptData(uint8_t* data, size_t len) {
+  initCryptKey();
+  for (size_t i = 0; i < len; i++) {
+    data[i] ^= cryptKey[i % 6];
+  }
+}
 
 // ----- 全局状态 -----
 static WiFiConfig wifiCfg;
@@ -115,9 +133,11 @@ bool loadWiFiConfig(WiFiConfig& cfg) {
   }
   cfg.ssid[31] = '\0';
 
+  // 读取加密密码并 XOR 解密
   for (int i = 0; i < 64; i++) {
     cfg.pass[i] = EEPROM.read(WIFI_EEPROM_BASE + 34 + i);
   }
+  cryptData((uint8_t*)cfg.pass, 64);  // XOR 解密 (与加密同一操作)
   cfg.pass[63] = '\0';
 
   cfg.mode = EEPROM.read(WIFI_EEPROM_BASE + 98);
@@ -129,12 +149,17 @@ bool loadWiFiConfig(WiFiConfig& cfg) {
 void saveWiFiConfig(const WiFiConfig& cfg) {
   EEPROM.put(WIFI_EEPROM_BASE, (uint16_t)WIFI_EEPROM_MAGIC);
 
+  // SSID 明文存储 (不算敏感)
   for (int i = 0; i < 32; i++) {
     EEPROM.write(WIFI_EEPROM_BASE + 2 + i, cfg.ssid[i]);
   }
 
+  // 密码 XOR 加密后存储
+  char encPass[64];
+  memcpy(encPass, cfg.pass, 64);
+  cryptData((uint8_t*)encPass, 64);
   for (int i = 0; i < 64; i++) {
-    EEPROM.write(WIFI_EEPROM_BASE + 34 + i, cfg.pass[i]);
+    EEPROM.write(WIFI_EEPROM_BASE + 34 + i, encPass[i]);
   }
 
   EEPROM.write(WIFI_EEPROM_BASE + 98, cfg.mode);
