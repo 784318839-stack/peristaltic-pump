@@ -2,7 +2,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。
 
-> **v2.2** (2026-07-07) — ESP32-S3-N16R8 8MB PSRAM 全面启用，WiFi AP+STA 双模连接家里路由器，多项 UI 优化和热管理。
+> **v2.2** (2026-07-08) — PSRAM 全面启用，WiFi AP+STA 双模，堵转检测，密码加密存储，多项 UI 优化和热管理。
 > **v2.1** (2026-07-06) — Web UI 改用 HTTP 轮询（取代 WebSocket），修复压缩后 `//` 注释破坏 JS 的 bug。
 > **v2.0** — 全面转向远程控制：WiFi Web UI + BLE UART + USB Serial，OLED/键盘已停用。
 
@@ -30,7 +30,8 @@
   - 连接成功后页面弹出 `✅ WiFi 已连接` 提示
   - header 实时显示可访问地址 `http://STA_IP | http://pump.local`
   - STA 失败不影响 SoftAP，30s 超时自动放弃
-  - 配置保存在 EEPROM，掉电不丢失
+  - 密码 XOR 加密存储 (设备 MAC 密钥)，拆机读 EEPROM 是乱码
+- 配置保存在 EEPROM，掉电不丢失
 - **WiFi 扫描**: 同步扫描 (~1 秒)，点击 SSID 自动填入
 - **密码可见**: 👁 按钮切换明文/密文
 
@@ -53,6 +54,8 @@
 - 💾 **PSRAM 监控** — 页面底部实时显示 PSRAM 和堆内存使用
 - 🔗 **访问地址** — header 显示当前可访问 URL (IP + mDNS)
 - ✅ **WiFi 状态** — STA 连接成功自动弹出提示
+- 🛡️ **堵转保护** — 步进电机 3 秒位置不变自动停机报警 (STALL_ERROR)
+- 🔐 **密码加密** — WiFi 密码 XOR 加密存储 (设备 MAC 密钥，拆机读 EEPROM 是乱码)
 
 ---
 
@@ -321,7 +324,19 @@ peristaltic_pump/
 
 ## 更新日志
 
-### v2.2 (2026-07-07)
+### v2.2 (2026-07-08)
+
+**堵转检测:**
+- 泵运行时 `stepper.currentPosition()` 3 秒不变 → 判定堵转
+- 堵转响应: 电机立即停转 + 断电，蜂鸣器三连音报警，WS2812 红色快闪
+- 新增 `STALL_ERROR` 状态，只接受 `stop`/`reset` 命令
+- JET 等待间隔期自动跳过检测
+
+**WiFi 密码加密:**
+- XOR 加密存储，密钥 = ESP32 出厂熔丝 Base MAC（每台设备唯一）
+- EEPROM 写入前加密，读取后解密
+- 完整性校验：解密后非可打印 ASCII → 清空配置回退 SoftAP
+- SSID 明文存储（不敏感）
 
 **PSRAM 全面启用:**
 - ESP32-S3-N16R8 8MB Octal PSRAM 启用 (OPI PSRAM)
