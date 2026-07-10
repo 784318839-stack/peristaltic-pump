@@ -2,7 +2,7 @@
  * 蠕动泵控制器 — YZ1515 精密点液 / 喷射工作站 ( 模块化版 )
  *
  * 硬件平台 : ESP32-S3-WROOM-1-N16 ( 16 MB Flash )
- * 依赖库   : AccelStepper, EEPROM, ArduinoJson, NimBLE-Arduino, WiFi, ESPmDNS
+ * 依赖库   : FastAccelStepper, EEPROM, ArduinoJson, NimBLE-Arduino, WiFi, ESPmDNS
  *            Adafruit NeoPixel ( WS2812 状态指示灯 )
  *
  * 功能清单 :
@@ -38,9 +38,6 @@
  ******************************************************************************/
 
 #include <Arduino.h>
-#include <AccelStepper.h>
-#include <EEPROM.h>
-
 // ===== 远程控制模块 =====
 #include "command_protocol.h"
 #include "serial_commands.h"
@@ -123,7 +120,8 @@ int  presetSlot  = 0;
 #define COMPLETIONS_PER_SAVE 10     // 每 10 次完成写 EEPROM
 
 // ----- 硬件对象 -----
-AccelStepper stepper( AccelStepper::DRIVER, STEP_PIN, DIR_PIN );
+FastAccelStepperEngine stepperEngine;
+FastAccelStepper *stepper = nullptr;
 
 // ============================================================================
 //                              初始化
@@ -158,22 +156,24 @@ void setup() {
   if ( !loadParams() ) saveParams();
   Serial.println( "[SETUP] eeprom ok" );
 
-  // Step 2 : GPIO + 步进电机
+  // Step 2 : GPIO + 步进电机 (FastAccelStepper RMT 硬件脉冲, 免疫 WiFi 抖动)
   pinMode( BUZZER_PIN, OUTPUT );
   digitalWrite( BUZZER_PIN, LOW );
-  // DM542 共阴接法 (GPIO→PUL+/DIR+, GND→PUL-/DIR-):
-  //   3.3V HIGH = 光耦导通 (~8mA, 可靠), LOW = 光耦截止
-  //   ENA 未接 (方案D), GPIO18 设输出但不影响硬件
   pinMode( STEP_PIN, OUTPUT );
   pinMode( DIR_PIN,  OUTPUT );
   digitalWrite( STEP_PIN, LOW );
   digitalWrite( DIR_PIN,  LOW );
   pinMode( ENA_PIN, OUTPUT );
   digitalWrite( ENA_PIN, LOW );
-  stepper.setEnablePin( ENA_PIN );
-  stepper.setMinPulseWidth( 30 );   // DM542 光耦 3.3V 驱动需较宽脉冲确保边沿清晰
-  stepper.enableOutputs();
-  stepperEnabled = true;
+  stepperEngine.init();
+  stepper = stepperEngine.stepperConnectToPin( STEP_PIN );
+  if ( stepper ) {
+    stepper->setDirectionPin( DIR_PIN );
+    stepper->setEnablePin( ENA_PIN );
+    stepper->setAutoEnable( true );
+    stepper->enableOutputs();
+    stepperEnabled = true;
+  }
   lastStepperActivity = millis();
   updateStepperSpeed();
   Serial.println( "[SETUP] gpio ok" );
@@ -216,10 +216,10 @@ void loop() {
   handleBluetooth();
   wifiMaintain();  // STA 连接状态维护 & mDNS
 
-  // ---- 防滴回吸状态 ----
+  // ---- 防滴回吸状态 (RMT 硬件自运行, 只检查完成) ----
   if ( pumpState == ANTI_DRIP ) {
     lastStepperActivity = millis();
-    if ( stepper.distanceToGo() == 0 ) {
+    if ( !stepper->isRunning() ) {
       pumpState = DONE;
       totalDispensed += targetVolume;
       completionCount++;
@@ -228,29 +228,26 @@ void loop() {
       }
       beepDone();
     }
-    stepper.run();
   }
 
   // ---- 运行状态 ----
   if ( pumpState == RUNNING ) {
     lastStepperActivity = millis();
     if ( calibRunning ) {
-      // 校准运行中
-      if ( stepper.distanceToGo() == 0 ) {
+      /* 校准运行中 — RMT 硬件自运行, 只读位置 */
+      if ( !stepper->isRunning() ) {
         dispensedVolume = calibTargetVol;
         calibFinishRun();
       } else {
-        dispensedVolume = ( float )stepper.currentPosition() / stepsPerMl;
+        dispensedVolume = ( float )stepper->getCurrentPosition() / stepsPerMl;
       }
-      stepper.run();
     } else if ( currentMenu == PRIME ) {
-      // 预灌模式 : 全速无限运转
-      dispensedVolume = ( float )stepper.currentPosition() / stepsPerMl;
-      stepper.runSpeedToPosition();
+      /* 预灌模式 : 全速无限运转 — runForward() 已启动, RMT 硬件自运行 */
+      dispensedVolume = ( float )stepper->getCurrentPosition() / stepsPerMl;
     } else if ( pumpMode == MODE_JET ) {
       // 喷射模式
       if ( jetSquirting ) {
-        if ( stepper.distanceToGo() == 0 ) {
+        if ( !stepper->isRunning() ) {
           jetCount++;
           dispensedVolume = jetCount * jetVolume;
           totalDispensed += jetVolume;
@@ -259,31 +256,29 @@ void loop() {
           jetSquirting = false;
           jetWaitStart = millis();
         }
-        stepper.run();
       } else {
         // 等待间隔中
         unsigned long elapsed = millis() - jetWaitStart;
         unsigned long intervalMs = ( unsigned long )( jetInterval * 1000 );
         if ( jetInterval > 15 && stepperEnabled ) {
-          stepper.disableOutputs(); stepperEnabled = false; beepDisable();
+          stepper->disableOutputs(); stepperEnabled = false; beepDisable();
         }
         if ( !stepperEnabled && jetInterval > 15 && elapsed >= intervalMs - 2000 ) {
-          stepper.enableOutputs(); stepperEnabled = true;
+          stepper->enableOutputs(); stepperEnabled = true;
         }
         if ( elapsed >= intervalMs ) startJetSquirt();
       }
     } else {
       // VOL 模式 / 定时模式
       pumpElapsed = ( millis() - pumpStartMs ) / 1000;
-      if ( stepper.distanceToGo() == 0 ) {
+      if ( !stepper->isRunning() ) {
         dispensedVolume = targetVolume;
         if ( antiDripVol > 0 ) {
           // 进入防滴回吸
-          stepper.setMaxSpeed( flowRateToPPS( flowRate ) * 0.3 );
-          stepper.setSpeed( 0 );
-          stepper.setAcceleration( flowRateToPPS( flowRate ) );
-          stepper.setCurrentPosition( 0 );
-          stepper.moveTo( -( long )( antiDripVol * stepsPerMl ) );
+          stepper->setSpeedInHz( ( uint32_t )( flowRateToPPS( flowRate ) * 0.3 ) );
+          stepper->setAcceleration( ( int )flowRateToPPS( flowRate ) );
+          stepper->setCurrentPosition( 0 );
+          stepper->moveTo( -( int32_t )( antiDripVol * stepsPerMl ) );
           pumpState = ANTI_DRIP;
         } else {
           pumpState = DONE;
@@ -292,31 +287,30 @@ void loop() {
           if ( completionCount >= COMPLETIONS_PER_SAVE ) { markDirty(); completionCount = 0; }
         }
       } else {
-        dispensedVolume = ( float )stepper.currentPosition() / stepsPerMl;
+        dispensedVolume = ( float )stepper->getCurrentPosition() / stepsPerMl;
         // 定时模式超时保护
         if ( pumpMode == MODE_TIME && pumpElapsed >= pumpDuration + 1 ) {
-          stepper.stop();
+          stepper->forceStop();
           pumpState = DONE;
           totalDispensed += targetVolume;
           completionCount++;
           if ( completionCount >= COMPLETIONS_PER_SAVE ) { markDirty(); completionCount = 0; }
         }
       }
-      stepper.run();
     }
 
     // ---- 堵转检测 (位置超时) ----
     // 跳过 JET 等待期 (jetSquirting=false 时电机不转)
     bool motorShouldMove = !( pumpMode == MODE_JET && !jetSquirting );
     if ( motorShouldMove ) {
-      long curPos = stepper.currentPosition();
+      int32_t curPos = stepper->getCurrentPosition();
       if ( curPos != stallLastPosition ) {
         stallLastPosition = curPos;
         stallCheckTime    = millis();
       } else if ( millis() - stallCheckTime > STALL_TIMEOUT_MS ) {
-        // 3 秒位置不变 → 堵转
-        stepper.stop();
-        stepper.disableOutputs();
+        /* 3 秒位置不变 → 堵转 */
+        stepper->forceStop();
+        stepper->disableOutputs();
         stepperEnabled = false;
         pumpState = STALL_ERROR;
         beepCancel(); beepCancel(); beepCancel();  // 三连音报警
@@ -330,8 +324,17 @@ void loop() {
     lastStepperActivity = millis();  // 防止空闲关使能冲突
   }
 
-  // ---- DONE 音效 ( 跳变沿触发 ) ----
-  if ( pumpState == DONE && prevPumpState != DONE && prevPumpState != ANTI_DRIP ) beepDone();
+  // ---- DONE 音效 & 2 秒后自动回到 IDLE ----
+  if ( pumpState == DONE ) {
+    static unsigned long doneAt = 0;
+    if ( prevPumpState != DONE ) {
+      if ( prevPumpState != ANTI_DRIP ) beepDone();  /* ANTI_DRIP 已经响过 */
+      doneAt = millis();
+    }
+    if ( millis() - doneAt > 2000 ) {
+      pumpState = STATE_IDLE;
+    }
+  }
   prevPumpState = pumpState;
 
   // ---- 空闲关使能 ----

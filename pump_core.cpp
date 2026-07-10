@@ -1,9 +1,8 @@
-﻿// pump_core.cpp - Stepper motor control, pump state machine, calibration
+// pump_core.cpp - Stepper motor control, pump state machine, calibration
 #include "pump_core.h"
 #include "pump_shared.h"
 #include "buzzer.h"
 #include "eeprom_store.h"
-#include <AccelStepper.h>
 
 // ----- Flow-to-pulse conversion -----
 float flowRateToPPS(float mLmin) {
@@ -13,15 +12,14 @@ float flowRateToPPS(float mLmin) {
 // ----- Stepper speed update -----
 void updateStepperSpeed() {
   float pps = flowRateToPPS(flowRate);
-  stepper.setMaxSpeed(pps);
-  stepper.setSpeed(0);
-  stepper.setAcceleration(pps * 0.5f);  // 缓加速, 3.3V 驱动光耦高速不丢步
+  stepper->setSpeedInHz((uint32_t)pps);
+  stepper->setAcceleration((int)(pps * 0.5f));  // 缓加速, 避免丢步
 }
 
 // ----- Enable management -----
 void ensureStepperOn() {
   if (!stepperEnabled) {
-    stepper.enableOutputs();
+    stepper->enableOutputs();
     stepperEnabled = true;
   }
   lastStepperActivity = millis();
@@ -31,7 +29,7 @@ void checkIdleDisable() {
   if (stepperEnabled
       && (pumpState == STATE_IDLE || pumpState == PAUSED)
       && millis() - lastStepperActivity > IDLE_DISABLE_MS) {
-    stepper.disableOutputs();
+    stepper->disableOutputs();
     stepperEnabled = false;
     beepDisable();
   }
@@ -55,22 +53,22 @@ void startPump() {
   pumpStartMs  = millis();
   dispensedVolume = 0;
 
-  long totalSteps = targetVolume * stepsPerMl;
-  stepper.setCurrentPosition(0);
-  stepper.moveTo(totalSteps);
+  int32_t totalSteps = (int32_t)(targetVolume * stepsPerMl);
+  stepper->setCurrentPosition(0);
+  stepper->moveTo(totalSteps);        /* RMT 硬件自动运行, 无需 loop 中调用 run() */
 
   beepStart();
   pumpState = RUNNING;
 }
 
 void stopPump() {
-  stepper.stop();
+  stepper->forceStop();
   pumpState = STATE_IDLE;
 }
 
 void pausePump() {
-  stepper.stop();
-  pausedRemainingSteps = stepper.distanceToGo();
+  stepper->forceStop();
+  pausedRemainingSteps = stepper->targetPos() - stepper->getCurrentPosition();
   if (pumpMode == MODE_TIME) {
     pausedElapsedSec = (millis() - pumpStartMs) / 1000;
   }
@@ -85,7 +83,7 @@ void resumePump() {
   if (pumpMode == MODE_TIME) {
     pumpStartMs = millis() - pausedElapsedSec * 1000;
   }
-  stepper.moveTo(stepper.currentPosition() + pausedRemainingSteps);
+  stepper->moveTo(stepper->getCurrentPosition() + pausedRemainingSteps);
   pumpState = RUNNING;
 }
 
@@ -94,7 +92,7 @@ void resetPump() {
   pumpElapsed     = 0;
   pausedRemainingSteps = 0;
   pausedElapsedSec     = 0;
-  stepper.setCurrentPosition(0);
+  stepper->setCurrentPosition(0);
   pumpState = STATE_IDLE;
 }
 
@@ -102,20 +100,19 @@ void resetPump() {
 void startJetSquirt() {
   ensureStepperOn();
   float pps = jetFlowRate * stepsPerMl / 60.0;
-  stepper.setMaxSpeed(pps);
-  stepper.setSpeed(0);
-  stepper.setAcceleration(pps * jetPressure * 0.4);
-  stepper.setCurrentPosition(0);
-  long jetSteps = jetVolume * stepsPerMl;
+  stepper->setSpeedInHz((uint32_t)pps);
+  stepper->setAcceleration((int)(pps * jetPressure * 0.4));
+  stepper->setCurrentPosition(0);
+  int32_t jetSteps = (int32_t)(jetVolume * stepsPerMl);
   if (jetSteps < 1) jetSteps = 1;
-  stepper.moveTo(jetSteps);
+  stepper->moveTo(jetSteps);
   jetSquirting = true;
 }
 
 void startJetCycle() {
   jetCount = 0;
   dispensedVolume = 0;
-  stepper.setCurrentPosition(0);
+  stepper->setCurrentPosition(0);
   ensureStepperOn();
   startJetSquirt();
   beepStart();
@@ -123,7 +120,7 @@ void startJetCycle() {
 }
 
 void stopJetCycle() {
-  stepper.stop();
+  stepper->forceStop();
   jetSquirting = false;
   pumpState = STATE_IDLE;
 }
@@ -152,22 +149,22 @@ void calibStartRun() {
   ensureStepperOn();
   updateStepperSpeed();
   dispensedVolume = 0;
-  long totalSteps = calibTargetVol * stepsPerMl;
-  stepper.setCurrentPosition(0);
-  stepper.moveTo(totalSteps);
+  int32_t totalSteps = (int32_t)(calibTargetVol * stepsPerMl);
+  stepper->setCurrentPosition(0);
+  stepper->moveTo(totalSteps);
   calibRunning = true;
   pumpState = RUNNING;
 }
 
 void calibStopRun() {
-  calibStepsRun = stepper.currentPosition();
-  stepper.stop();
+  calibStepsRun = stepper->getCurrentPosition();
+  stepper->forceStop();
   calibRunning = false;
   pumpState = STATE_IDLE;
 }
 
 void calibFinishRun() {
-  calibStepsRun = stepper.currentPosition();
+  calibStepsRun = stepper->getCurrentPosition();
   calibRunning = false;
   pumpState = DONE;
 }

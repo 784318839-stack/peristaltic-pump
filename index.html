@@ -126,7 +126,7 @@ button:active{transform:scale(.95);opacity:.8}
     <h2>运行控制</h2>
     <div class="btn-row">
       <button class="btn-start" onclick="sendCmd('start')" id="btnStart">▶ 启动</button>
-      <button class="btn-pause" onclick="sendCmd('pause')" id="btnPause" disabled>⏸ 暂停</button>
+      <button class="btn-pause" onclick="handlePauseResume()" id="btnPause" disabled>⏸ 暂停</button>
       <button class="btn-stop" onclick="sendCmd('stop')" id="btnStop" disabled>■ 停止</button>
     </div>
   </div>
@@ -332,6 +332,14 @@ function sendCmd(cmd, params = {}) {
   }).catch(() => {});
 }
 
+function handlePauseResume() {
+  if (currentState === 'PAUSED') {
+    sendCmd('resume');
+  } else {
+    sendCmd('pause');
+  }
+}
+
 function updateUI(d) {
   currentState = d.state;
   currentMode = d.mode;
@@ -391,10 +399,28 @@ function updateUI(d) {
   const isRunning = d.state === 'RUNNING';
   const isPaused = d.state === 'PAUSED';
   const isDone = d.state === 'DONE';
+  const isStall = d.state === 'STALL_ERROR';
 
   $('#btnStart').disabled = !(isIdle || isDone);
-  $('#btnPause').disabled = !isRunning;
-  $('#btnStop').disabled = !(isRunning || isPaused);
+  $('#btnStop').disabled = !(isRunning || isPaused || isStall);
+
+  if (isStall) {
+    $('#btnPause').disabled = true;
+    $('#btnPause').textContent = '⚠ 堵转';
+    $('#btnPause').className = 'btn-stop';
+  } else if (isPaused) {
+    $('#btnPause').disabled = false;
+    $('#btnPause').textContent = '▶ 继续';
+    $('#btnPause').className = 'btn-start';
+  } else if (isRunning) {
+    $('#btnPause').disabled = false;
+    $('#btnPause').textContent = '⏸ 暂停';
+    $('#btnPause').className = 'btn-pause';
+  } else {
+    $('#btnPause').disabled = true;
+    $('#btnPause').textContent = '⏸ 暂停';
+    $('#btnPause').className = 'btn-pause';
+  }
 
   if (d.calibStep !== undefined && d.calibStep >= 0) {
     var uiStep = d.calibStep - 1;
@@ -553,22 +579,36 @@ function wifiSave() {
   });
 }
 
+let wifiScanTimer = null;
 function wifiScan() {
+  if (wifiScanTimer) clearInterval(wifiScanTimer);
   $('#wifiScanResult').textContent = '扫描中...';
-  fetch('/api/scan').then(r => r.json()).then(d => {
-    const nets = d.networks || [];
-    if (nets.length === 0) {
-      $('#wifiScanResult').textContent = '未发现 WiFi 网络';
-      return;
-    }
-    $('#wifiScanResult').innerHTML = nets.map(n =>
-      `<div style="padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)" onclick="$('#wifiSSID').value='${n.ssid}'">
-        ${n.ssid} ${n.secure?'🔒':''} <span style="color:var(--text3)">${n.rssi}dBm</span>
-      </div>`
-    ).join('');
-  }).catch(() => {
-    $('#wifiScanResult').textContent = '扫描失败，请重试';
-  });
+  var dots = 0;
+  wifiScanTimer = setInterval(function() {
+    fetch('/api/scan').then(r => r.json()).then(d => {
+      if (d.done) {
+        clearInterval(wifiScanTimer);
+        wifiScanTimer = null;
+        var nets = d.networks || [];
+        if (nets.length === 0) {
+          $('#wifiScanResult').textContent = '未发现 WiFi 网络';
+          return;
+        }
+        $('#wifiScanResult').innerHTML = nets.map(function(n) {
+          return '<div style="padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)" onclick="document.getElementById(\'wifiSSID\').value=\'' + n.ssid.replace(/'/g, "\\'") + '\'">'
+            + n.ssid + (n.secure ? ' 🔒' : '') + ' <span style="color:var(--text3)">' + n.rssi + 'dBm</span>'
+            + '</div>';
+        }).join('');
+      } else {
+        dots = (dots + 1) % 4;
+        $('#wifiScanResult').textContent = '扫描中' + '.'.repeat(dots);
+      }
+    }).catch(function() {
+      clearInterval(wifiScanTimer);
+      wifiScanTimer = null;
+      $('#wifiScanResult').textContent = '扫描失败，请重试';
+    });
+  }, 300);
 }
 
 let toastTimer;

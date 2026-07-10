@@ -387,10 +387,10 @@ const char* parseAndExecute( const char* json ) {
     if ( pumpState != STATE_IDLE ) return errResponse( cmd, "Pump not idle" );
     currentMenu = PRIME;
     ensureStepperOn();
-    stepper.setMaxSpeed( flowRateToPPS( 2000.0 ) );
-    stepper.setSpeed( flowRateToPPS( 2000.0 ) );
-    stepper.setCurrentPosition( 0 );
-    stepper.moveTo( 999999999L );
+    stepper->setSpeedInHz( ( uint32_t )flowRateToPPS( 2000.0 ) );
+    stepper->setAcceleration( ( int )flowRateToPPS( 2000.0 ) );
+    stepper->setCurrentPosition( 0 );
+    stepper->moveTo( 999999999 );  /* 远超实际, RMT 硬件持续运行直到 forceStop */
     dispensedVolume = 0;
     pumpState = RUNNING;
     beepStart();

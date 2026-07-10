@@ -66,19 +66,21 @@ static int getContentLength(const String &headers) {
 }
 
 // ============================================================================
-//                            WiFi 扫描 (同步)
+//                            WiFi 扫描 (异步, 不阻塞主循环)
 // ============================================================================
-static String doWifiScanJson() {
-  WiFi.scanDelete();
-  // 同步扫描: per-channel 80ms, 13 通道约 1 秒
-  int n = WiFi.scanNetworks(false, false, false, 80);
-  if (n <= 0) return "{\"networks\":[]}";
 
+static bool wifiScanStarted = false;
+
+static String buildScanResultJson(int n) {
   String json = "{\"networks\":[";
-  for (int i = 0; i < n && i < 20; i++) {  // 最多 20 个
+  for (int i = 0; i < n && i < 20; i++) {
     if (i > 0) json += ",";
     json += "{\"ssid\":\"";
-    json += WiFi.SSID(i);
+    String ssid = WiFi.SSID(i);
+    /* 简单转义 JSON 中的引号 */
+    ssid.replace("\\", "\\\\");
+    ssid.replace("\"", "\\\"");
+    json += ssid;
     json += "\",\"rssi\":";
     json += WiFi.RSSI(i);
     json += ",\"secure\":";
@@ -86,7 +88,6 @@ static String doWifiScanJson() {
     json += "}";
   }
   json += "]}";
-  WiFi.scanDelete();
   return json;
 }
 
@@ -186,13 +187,42 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi 扫描 (同步 ~1 秒, 泵运行时拒绝)
+  // GET /api/scan -> WiFi 扫描 (异步, 不阻塞; 前端轮询直到完成)
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pumpState == RUNNING || pumpState == PAUSED) {
-      sendJson(client, 200, "{\"error\":\"Pump busy, stop first\",\"networks\":[]}");
+      sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
-    sendJson(client, 200, doWifiScanJson().c_str());
+
+    /* 首次调用: 启动异步扫描 */
+    if (!wifiScanStarted) {
+      WiFi.scanDelete();
+      WiFi.scanNetworks(true, false, false, 80);  /* async=true */
+      wifiScanStarted = true;
+      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
+      return;
+    }
+
+    /* 后续轮询: 检查扫描状态 */
+    int scanState = WiFi.scanComplete();
+    if (scanState == WIFI_SCAN_RUNNING) {
+      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
+      return;
+    }
+
+    wifiScanStarted = false;  /* 扫描已结束 (成功或失败) */
+
+    if (scanState > 0) {
+      String json = "{\"ok\":true,\"done\":true,";
+      json += buildScanResultJson(scanState).substring(1);
+      WiFi.scanDelete();
+      sendJson(client, 200, json.c_str());
+      return;
+    }
+
+    /* scanState <= 0: 失败或无网络 */
+    WiFi.scanDelete();
+    sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
     return;
   }
 

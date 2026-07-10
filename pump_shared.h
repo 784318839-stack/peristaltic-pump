@@ -99,10 +99,11 @@ extern unsigned long pausedElapsedSec;
 #include "led.h"
 
 // ----- 硬件对象 (定义在 .ino) -----
-#include <AccelStepper.h>
+#include <FastAccelStepper.h>
 #include <EEPROM.h>
 
-extern AccelStepper stepper;
+extern FastAccelStepperEngine stepperEngine;
+extern FastAccelStepper *stepper;
 
 // ----- 甯搁噺 -----
 #define STEP_PIN   16
