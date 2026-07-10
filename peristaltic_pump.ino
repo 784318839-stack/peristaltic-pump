@@ -66,10 +66,9 @@ State     prevPumpState = STATE_IDLE;
 PumpMode  pumpMode      = MODE_VOLUME;
 Menu      currentMenu   = MAIN;
 CalibStep calibStep     = CALIB_IDLE;
-SetEdit   settingEdit   = SET_NONE;
 
 // ----- 泵送核心参数 -----
-float stepsPerMl      = 1000.0;
+float stepsPerMl      = 250.0;  // 400 pulse/rev (细分 400)
 float flowRate        = 50.0;
 float targetVolume    = 10.0;
 float dispensedVolume = 0;
@@ -89,7 +88,7 @@ unsigned long jetWaitStart = 0;
 
 // ----- 多液体校准 -----
 const char* liquidNames[NUM_LIQUIDS] = { "Wtr", "Thk", "Org", "Cst" };
-float liquidSPM[NUM_LIQUIDS] = { 1000.0, 1000.0, 1000.0, 1000.0 };
+float liquidSPM[NUM_LIQUIDS] = { 250.0, 250.0, 250.0, 250.0 };
 int   currentLiquid = 0;
 
 // ----- 累计 & 管路寿命 -----
@@ -162,9 +161,17 @@ void setup() {
   // Step 2 : GPIO + 步进电机
   pinMode( BUZZER_PIN, OUTPUT );
   digitalWrite( BUZZER_PIN, LOW );
+  // DM542 共阴接法 (GPIO→PUL+/DIR+, GND→PUL-/DIR-):
+  //   3.3V HIGH = 光耦导通 (~8mA, 可靠), LOW = 光耦截止
+  //   ENA 未接 (方案D), GPIO18 设输出但不影响硬件
+  pinMode( STEP_PIN, OUTPUT );
+  pinMode( DIR_PIN,  OUTPUT );
+  digitalWrite( STEP_PIN, LOW );
+  digitalWrite( DIR_PIN,  LOW );
   pinMode( ENA_PIN, OUTPUT );
   digitalWrite( ENA_PIN, LOW );
   stepper.setEnablePin( ENA_PIN );
+  stepper.setMinPulseWidth( 30 );   // DM542 光耦 3.3V 驱动需较宽脉冲确保边沿清晰
   stepper.enableOutputs();
   stepperEnabled = true;
   lastStepperActivity = millis();

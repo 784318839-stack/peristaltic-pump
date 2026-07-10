@@ -15,7 +15,7 @@ void updateStepperSpeed() {
   float pps = flowRateToPPS(flowRate);
   stepper.setMaxSpeed(pps);
   stepper.setSpeed(0);
-  stepper.setAcceleration(pps * 2);
+  stepper.setAcceleration(pps * 0.5f);  // 缓加速, 3.3V 驱动光耦高速不丢步
 }
 
 // ----- Enable management -----

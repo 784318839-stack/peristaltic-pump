@@ -29,11 +29,17 @@ static WiFiServer server(80);
 // ============================================================================
 
 static void sendJson(WiFiClient &client, int code, const char* json) {
-  client.printf("HTTP/1.1 %d OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n%s", code, json);
+  client.print("HTTP/1.1 ");
+  client.print(code);
+  client.print(" OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n");
+  client.print(json);
 }
 
 static void sendHtml(WiFiClient &client, int code, const char* html) {
-  client.printf("HTTP/1.1 %d OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n%s", code, html);
+  client.print("HTTP/1.1 ");
+  client.print(code);
+  client.print(" OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n");
+  client.print(html);
 }
 
 static String getQueryParam(const String &url, const char* key) {

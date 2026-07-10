@@ -21,7 +21,7 @@ enum Menu     { MAIN, SET_FLOW, SET_VOL, SET_TIME, CALIBRATE, PRIME,
                 SELECT_LIQUID, JET_OPTIONS, PRESET_LOAD };
 enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
                  CALIB_RUN, CALIB_MEASURE, CALIB_RESULT, CALIB_SETTINGS };
-enum SetEdit  { SET_NONE, SET_ANTI_DRIP, SET_TUBE_LIFE, SET_LIQUID };
+// (SetEdit removed — OLED/settings editing disabled)
 
 // ============================================================================
 //                          鍏ㄥ眬鍙橀噺 extern 澹版槑
@@ -33,9 +33,8 @@ extern State     prevPumpState;
 extern PumpMode  pumpMode;
 extern Menu      currentMenu;
 extern CalibStep calibStep;
-extern SetEdit   settingEdit;
 
-// ----- 娉甸€佹牳蹇冨弬鏁?-----
+// ----- 泵送核心参数 -----
 extern float stepsPerMl;
 extern float flowRate;
 extern float targetVolume;
@@ -79,8 +78,6 @@ extern unsigned long lastStepperActivity;
 extern long          stallLastPosition;
 extern unsigned long stallCheckTime;
 #define STALL_TIMEOUT_MS  3000
-// extern unsigned long lastUserActivity; // disabled
-// extern bool         screensaverActive; // disabled
 
 // ----- EEPROM -----
 extern bool eepromDirty;
@@ -90,10 +87,6 @@ extern int presetSlot;
 // ----- 暂停断点 (used by pump_core.cpp) -----
 extern long          pausedRemainingSteps;
 extern unsigned long pausedElapsedSec;
-
-// ----- 鏁板瓧杈撳叆缂撳啿 (灏界杩滅▼鎺у埗涓嶇洿鎺ョ敤, 澹版槑浠ヤ究瀹屾暣) -----
-extern char inputBuf[8];
-extern int  inputLen;
 
 // ============================================================================
 //                           Pump control function declarations
@@ -105,30 +98,11 @@ extern int  inputLen;
 #include "pump_core.h"
 #include "led.h"
 
-// Removed from here (now in module headers):
-//   buzzer.h:       beepInput/Confirm/Cancel/Start/Pause/Done/Disable, buzzer_tick
-//   eeprom_store.h: markDirty, saveParams, loadParams, isPresetValid, savePreset, loadPreset
-//   pump_core.h:    flowRateToPPS, updateStepperSpeed, ensureStepperOn, checkIdleDisable,
-//                   startPump, stopPump, pausePump, resumePump, resetPump,
-//                   startJetSquirt/Cycle, stopJetCycle, selectLiquid,
-//                   calibEnter/StartRun/StopRun/FinishRun/Calculate/Save,
-//                   inputClear/Backspace/Append, inputToFloat
-
-// 鏄剧ず
-// void updateDisplay(); // OLED disabled
-
-// 鎸夐敭澶勭悊
-// void handleKey(char key); // keypad disabled
-
-// ----- 纭欢瀵硅薄 (瀹氫箟鍦?.ino) -----
+// ----- 硬件对象 (定义在 .ino) -----
 #include <AccelStepper.h>
-// #include <U8g2lib.h> // OLED disabled
-// #include <Keypad.h> // keypad disabled
 #include <EEPROM.h>
 
 extern AccelStepper stepper;
-// extern U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2; // OLED disabled
-// extern Keypad keypad; // keypad disabled
 
 // ----- 甯搁噺 -----
 #define STEP_PIN   16

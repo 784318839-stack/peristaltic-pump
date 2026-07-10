@@ -3,7 +3,7 @@
 #include "pump_shared.h"
 #include <EEPROM.h>
 
-#define EEPROM_MAGIC  0x5058
+#define EEPROM_MAGIC  0x5059  // v4.1: 400 pulse/rev 细分
 #define EEPROM_ADDR   0
 #define PRESET_BASE   64
 #define PRESET_SIZE   30

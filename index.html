@@ -406,12 +406,12 @@ function updateUI(d) {
     if (d.wifiIP) info += ' | ' + d.wifiIP;
     if (d.wifiClients !== undefined && d.wifiClients > 0) info += ' | 📶' + d.wifiClients;
     $('#wifiInfo').textContent = info;
-    // 可访问地址
+    /* 可访问地址 */
     var url = d.wifiMode === 'sta+ap' && d.wifiIP
       ? 'http://' + d.wifiIP + '  |  http://pump.local'
       : 'http://192.168.4.1';
     $('#pumpUrl').textContent = url;
-    // STA 连接成功提示
+    /* STA 连接成功提示 */
     if (d.wifiMode === 'sta+ap' && lastWifiMode !== 'sta+ap') {
       toast('✅ WiFi 已连接: ' + (d.wifiIP || ''));
     }
