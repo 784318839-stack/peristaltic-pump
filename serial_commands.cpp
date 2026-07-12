@@ -36,7 +36,7 @@ void initSerialBuffers() {
 void initSerialCommands() {
   unsigned long start = millis();
   while ( !Serial && millis() - start < 2000 ) { delay( 10 ); }
-  Serial.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.1\"}" );
+  Serial.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.3.2\"}" );
 }
 
 void processSerialCommands() {
@@ -66,7 +66,7 @@ void initHardwareUart() {
   hwUart.begin( 115200, SERIAL_8N1, HW_UART_RX, HW_UART_TX );
   unsigned long start = millis();
   while ( !hwUart && millis() - start < 1000 ) { delay( 5 ); }
-  hwUart.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.1\",\"port\":\"UART1\"}" );
+  hwUart.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.3.2\",\"port\":\"UART1\"}" );
 }
 
 void processHardwareUart() {

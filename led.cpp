@@ -1,4 +1,4 @@
-// led.cpp - WS2812 status LED on GPIO48
+﻿// led.cpp - WS2812 status LED on GPIO48
 // Color scheme:
 //   IDLE       : dim green breathing
 //   RUNNING    : blue solid
@@ -10,6 +10,7 @@
 //   BLE conn   : cyan micro-glow overlay
 #include "led.h"
 #include "pump_shared.h"
+#include "pump_state.h"
 #include <Adafruit_NeoPixel.h>
 
 #define LED_PIN   48
@@ -59,7 +60,7 @@ void led_tick() {
   float dim = 1.0;
   bool pulse = false;
 
-  switch (pumpState) {
+  switch (pump.state) {
     case STATE_IDLE:
       r = 0; g = 30; b = 0;
       // Breathing: slow sine wave
@@ -67,9 +68,9 @@ void led_tick() {
       break;
 
     case RUNNING:
-      if (pumpMode == MODE_JET) {
+      if (pump.mode == MODE_JET) {
         r = 30; g = 0; b = 30;   // magenta for jet
-      } else if (pumpMode == MODE_TIME) {
+      } else if (pump.mode == MODE_TIME) {
         r = 0; g = 20; b = 60;   // deeper blue for timed
       } else {
         r = 0; g = 0; b = 80;    // blue for volume
@@ -108,8 +109,8 @@ void led_tick() {
   }
 
   // Tube life warning overlay (>80%)
-  bool tubeWarn = (tubeLifeML > 0 && totalDispensed > tubeLifeML * 0.8);
-  if (tubeWarn && (pumpState == STATE_IDLE || pumpState == DONE)) {
+  bool tubeWarn = (pump.tubeLifeML > 0 && pump.totalDispensed > pump.tubeLifeML * 0.8);
+  if (tubeWarn && (pump.state == STATE_IDLE || pump.state == DONE)) {
     // Red blink every ~2 seconds
     float blink = sin(g_phase * 0.03);
     if (blink > 0.7) { r = 80; g = 0; b = 0; dim = 0.5; }
@@ -119,14 +120,14 @@ void led_tick() {
   setRGBDim(r, g, b, dim);
 
   // Reset phase on state change (for DONE fade timing)
-  if (pumpState != g_lastState    || pumpMode   != g_lastMode ||
-      stepperEnabled != g_lastEnabled || tubeWarn != (g_lastTubePct > 80)) {
+  if (pump.state != g_lastState    || pump.mode   != g_lastMode ||
+      pump.stepperEnabled != g_lastEnabled || tubeWarn != (g_lastTubePct > 80)) {
     g_phase = 0;
   }
-  g_lastState   = pumpState;
-  g_lastMode    = pumpMode;
-  g_lastEnabled = stepperEnabled;
-  g_lastTubePct = (tubeLifeML > 0) ? (int)(totalDispensed / tubeLifeML * 100) : 0;
+  g_lastState   = pump.state;
+  g_lastMode    = pump.mode;
+  g_lastEnabled = pump.stepperEnabled;
+  g_lastTubePct = (pump.tubeLifeML > 0) ? (int)(pump.totalDispensed / pump.tubeLifeML * 100) : 0;
 }
 
 void led_update() {

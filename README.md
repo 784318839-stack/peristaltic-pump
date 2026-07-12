@@ -2,6 +2,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。
 
+> **v2.3.2** (2026-07-12) — PumpState 结构体重构，pump_machine 状态机模块提取，架构更清晰。
 > **v2.2** (2026-07-08) — PSRAM 全面启用，WiFi AP+STA 双模，堵转检测，密码加密存储，多项 UI 优化和热管理。
 > **v2.1** (2026-07-06) — Web UI 改用 HTTP 轮询（取代 WebSocket），修复压缩后 `//` 注释破坏 JS 的 bug。
 > **v2.0** — 全面转向远程控制：WiFi Web UI + BLE UART + USB Serial，OLED/键盘已停用。
@@ -285,8 +286,10 @@ WS2812: 48                   (RGB 状态指示灯)
 
 ```
 peristaltic_pump/
-├── peristaltic_pump.ino      # 主程序
-├── pump_shared.h             # 共享类型 & extern 声明
+├── peristaltic_pump.ino      # 主程序 (setup/loop 组装)
+├── pump_state.h/cpp           # PumpState 结构体 — 所有运行状态集中管理
+├── pump_machine.h/cpp         # 泵状态机 — transition() + per-state tick
+├── pump_shared.h              # 枚举 / 常量 / extern 声明
 ├── pump_core.h/cpp           # 泵控制核心 (启停/暂停/恢复/喷射/校准)
 ├── eeprom_store.h/cpp        # EEPROM 持久化存储
 ├── wifi_manager.h/cpp        # WiFi 管理 (SoftAP/Station + EEPROM)
@@ -298,13 +301,10 @@ peristaltic_pump/
 ├── serial_commands.h/cpp     # USB 串口 + 硬件 UART 命令入口
 ├── buzzer.h/cpp              # 非阻塞蜂鸣器驱动
 ├── led.h/cpp                 # WS2812 状态指示灯
-├── pump_chinese_font.h       # 中文字库 (SimHei 14px, 124 字 — OLED 已停用)
 ├── pump_cli.py               # Python CLI 控制工具
 ├── generate_web_ui.py        # Web UI 构建脚本: index.html → web_ui_gen.h
 ├── build_web_ui.py           # Web UI 备选构建脚本
 ├── xtoys_script.js           # XToys 平台集成脚本
-├── strip_chinese.py          # 中文字符串提取脚本
-├── strip_kb_oled.py          # 剥离键盘/OLED 代码脚本
 └── README.md
 ```
 
@@ -314,7 +314,7 @@ peristaltic_pump/
 
 | 库 | 用途 |
 |---|---|
-| [AccelStepper](https://github.com/waspinator/AccelStepper) | 步进电机驱动 (匀加速) |
+| [FastAccelStepper](https://github.com/gin66/FastAccelStepper) | 步进电机驱动 (RMT 硬件加速, 匀加速) |
 | [ArduinoJson](https://arduinojson.org/) (v7) | JSON 解析/序列化 |
 | [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) | BLE UART |
 | [U8g2](https://github.com/olikraus/u8g2) | OLED 图形库 *(v2.0 已停用)* |
@@ -323,6 +323,23 @@ peristaltic_pump/
 ---
 
 ## 更新日志
+
+### v2.3.2 (2026-07-12)
+
+**架构重构:**
+- 引入 `PumpState` 结构体 — 所有运行参数/状态/校准数据集中管理于 `pump_state.h`
+- 提取 `pump_machine` 状态机模块 — `transition()` 统一状态切换 + `on_entry()` 入口回调
+- `loop()` 从 ~150 行状态处理缩减为 `pump_machine_tick()` 一行调用
+- 每个状态独立 `tick_*()` 函数: `tick_running()`, `tick_anti_drip()`, `tick_done()`, `tick_stall_error()`
+
+**优化:**
+- 堵转检测从 inline loop 迁移到 `tick_running()` 内部
+- DONE → IDLE 自动转换 (2s) 纳入 `tick_done()` 管理
+- ANTI_DRIP 状态处理从 inline loop 迁移到 `tick_anti_drip()`
+- LINK 依赖从 AccelStepper 更新为 FastAccelStepper 文档
+
+**清理:**
+- 移除 OLED 字库相关文件 (`pump_chinese_font.h`, `strip_chinese.py`, `strip_kb_oled.py` 等)
 
 ### v2.2 (2026-07-08)
 

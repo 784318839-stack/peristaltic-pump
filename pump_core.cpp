@@ -1,210 +1,143 @@
-// pump_core.cpp - Stepper motor control, pump state machine, calibration
+﻿// pump_core.cpp - Stepper motor control, pump state machine, calibration
 #include "pump_core.h"
+#include "pump_state.h"
 #include "pump_shared.h"
+#include "pump_machine.h"
 #include "buzzer.h"
 #include "eeprom_store.h"
 
-// ----- Flow-to-pulse conversion -----
 float flowRateToPPS(float mLmin) {
-  return mLmin * stepsPerMl / 60.0;
+  return mLmin * pump.stepsPerMl / 60.0;
 }
 
-// ----- Stepper speed update -----
 void updateStepperSpeed() {
-  float pps = flowRateToPPS(flowRate);
+  float pps = flowRateToPPS(pump.flowRate);
   stepper->setSpeedInHz((uint32_t)pps);
-  stepper->setAcceleration((int)(pps * 0.5f));  // 缓加速, 避免丢步
+  stepper->setAcceleration((int)(pps * ACCEL_FACTOR));
 }
 
-// ----- Enable management -----
 void ensureStepperOn() {
-  if (!stepperEnabled) {
+  if (!pump.stepperEnabled) {
     stepper->enableOutputs();
-    stepperEnabled = true;
+    pump.stepperEnabled = true;
   }
-  lastStepperActivity = millis();
+  pump.lastStepperActivity = millis();
 }
 
 void checkIdleDisable() {
-  if (stepperEnabled
-      && (pumpState == STATE_IDLE || pumpState == PAUSED)
-      && millis() - lastStepperActivity > IDLE_DISABLE_MS) {
+  if (pump.stepperEnabled
+      && (pump.state == STATE_IDLE || pump.state == PAUSED)
+      && millis() - pump.lastStepperActivity > IDLE_DISABLE_MS) {
     stepper->disableOutputs();
-    stepperEnabled = false;
+    pump.stepperEnabled = false;
     beepDisable();
   }
 }
 
-// ----- Pump state machine -----
 void startPump() {
-  if (pumpMode == MODE_TIME) {
-    if (targetVolume <= 0 || targetTime <= 0) return;
-    float calcFlow = targetVolume / (targetTime / 60.0);
-    flowRate = constrain(calcFlow, 0.1, 2000.0);
+  if (pump.mode == MODE_TIME) {
+    if (pump.targetVolume <= 0 || pump.targetTime <= 0) return;
+    float calcFlow = pump.targetVolume / (pump.targetTime / 60.0);
+    pump.flowRate = constrain(calcFlow, 0.1, 2000.0);
   } else {
-    if (flowRate <= 0 || targetVolume <= 0) return;
+    if (pump.flowRate <= 0 || pump.targetVolume <= 0) return;
   }
-
   ensureStepperOn();
   updateStepperSpeed();
-
-  pumpDuration = (unsigned long)targetTime;
-  pumpElapsed  = 0;
-  pumpStartMs  = millis();
-  dispensedVolume = 0;
-
-  int32_t totalSteps = (int32_t)(targetVolume * stepsPerMl);
+  pump.pumpDuration = (unsigned long)pump.targetTime;
+  pump.pumpElapsed = 0;
+  pump.pumpStartMs = millis();
+  pump.dispensedVolume = 0;
+  int32_t totalSteps = (int32_t)(pump.targetVolume * pump.stepsPerMl);
   stepper->setCurrentPosition(0);
-  stepper->moveTo(totalSteps);        /* RMT 硬件自动运行, 无需 loop 中调用 run() */
-
+  stepper->moveTo(totalSteps);
   beepStart();
-  pumpState = RUNNING;
+  pump_machine_transition(RUNNING);
 }
 
-void stopPump() {
-  stepper->forceStop();
-  pumpState = STATE_IDLE;
-}
+void stopPump() { stepper->forceStop(); pump_machine_transition(STATE_IDLE); }
 
 void pausePump() {
   stepper->forceStop();
-  pausedRemainingSteps = stepper->targetPos() - stepper->getCurrentPosition();
-  if (pumpMode == MODE_TIME) {
-    pausedElapsedSec = (millis() - pumpStartMs) / 1000;
-  }
-  beepPause();
-  pumpState = PAUSED;
+  pump.pausedRemainingSteps = stepper->targetPos() - stepper->getCurrentPosition();
+  if (pump.mode == MODE_TIME) pump.pausedElapsedSec = (millis() - pump.pumpStartMs) / 1000;
+  pump_machine_transition(PAUSED);
 }
 
 void resumePump() {
   ensureStepperOn();
   updateStepperSpeed();
   beepStart();
-  if (pumpMode == MODE_TIME) {
-    pumpStartMs = millis() - pausedElapsedSec * 1000;
-  }
-  stepper->moveTo(stepper->getCurrentPosition() + pausedRemainingSteps);
-  pumpState = RUNNING;
+  if (pump.mode == MODE_TIME) pump.pumpStartMs = millis() - pump.pausedElapsedSec * 1000;
+  stepper->moveTo(stepper->getCurrentPosition() + pump.pausedRemainingSteps);
+  pump_machine_transition(RUNNING);
 }
 
 void resetPump() {
-  dispensedVolume = 0;
-  pumpElapsed     = 0;
-  pausedRemainingSteps = 0;
-  pausedElapsedSec     = 0;
+  pump.dispensedVolume = 0; pump.pumpElapsed = 0;
+  pump.pausedRemainingSteps = 0; pump.pausedElapsedSec = 0;
   stepper->setCurrentPosition(0);
-  pumpState = STATE_IDLE;
+  pump_machine_transition(STATE_IDLE);
 }
 
-// ----- JET mode -----
 void startJetSquirt() {
   ensureStepperOn();
-  float pps = jetFlowRate * stepsPerMl / 60.0;
+  float pps = pump.jetFlowRate * pump.stepsPerMl / 60.0;
   stepper->setSpeedInHz((uint32_t)pps);
-  stepper->setAcceleration((int)(pps * jetPressure * 0.4));
+  stepper->setAcceleration((int)(pps * pump.jetPressure * 0.4));
   stepper->setCurrentPosition(0);
-  int32_t jetSteps = (int32_t)(jetVolume * stepsPerMl);
+  int32_t jetSteps = (int32_t)(pump.jetVolume * pump.stepsPerMl);
   if (jetSteps < 1) jetSteps = 1;
   stepper->moveTo(jetSteps);
-  jetSquirting = true;
+  pump.jetSquirting = true;
 }
 
 void startJetCycle() {
-  jetCount = 0;
-  dispensedVolume = 0;
+  pump.jetCount = 0; pump.dispensedVolume = 0;
   stepper->setCurrentPosition(0);
-  ensureStepperOn();
-  startJetSquirt();
+  ensureStepperOn(); startJetSquirt();
   beepStart();
-  pumpState = RUNNING;
+  pump_machine_transition(RUNNING);
 }
 
-void stopJetCycle() {
-  stepper->forceStop();
-  jetSquirting = false;
-  pumpState = STATE_IDLE;
-}
+void stopJetCycle() { stepper->forceStop(); pump.jetSquirting = false; pump_machine_transition(STATE_IDLE); }
 
 void selectLiquid(int idx) {
   if (idx < 0 || idx >= NUM_LIQUIDS) return;
-  currentLiquid = idx;
-  stepsPerMl = liquidSPM[idx];
-  markDirty();
+  pump.currentLiquid = idx; pump.stepsPerMl = pump.liquidSPM[idx]; markDirty();
 }
 
-// ----- Calibration -----
 void calibEnter() {
-  calibStep       = CALIB_SELECT_LIQUID;
-  calibTargetVol  = 10.0;
-  calibActualVol  = 0;
-  calibStepsRun   = 0;
-  calibNewSPM     = 0;
-  calibRunning    = false;
-  inputClear();
-  currentMenu     = CALIBRATE;
+  pump.calibStep = CALIB_SELECT_LIQUID; pump.calibTargetVol = 10.0;
+  pump.calibActualVol = 0; pump.calibStepsRun = 0; pump.calibNewSPM = 0;
+  pump.calibRunning = false; inputClear(); pump.currentMenu = CALIBRATE;
 }
 
 void calibStartRun() {
-  if (calibTargetVol <= 0) return;
-  ensureStepperOn();
-  updateStepperSpeed();
-  dispensedVolume = 0;
-  int32_t totalSteps = (int32_t)(calibTargetVol * stepsPerMl);
-  stepper->setCurrentPosition(0);
-  stepper->moveTo(totalSteps);
-  calibRunning = true;
-  pumpState = RUNNING;
+  if (pump.calibTargetVol <= 0) return;
+  ensureStepperOn(); updateStepperSpeed();
+  pump.dispensedVolume = 0;
+  int32_t totalSteps = (int32_t)(pump.calibTargetVol * pump.stepsPerMl);
+  stepper->setCurrentPosition(0); stepper->moveTo(totalSteps);
+  pump.calibRunning = true;
+  pump_machine_transition(RUNNING);
 }
 
-void calibStopRun() {
-  calibStepsRun = stepper->getCurrentPosition();
-  stepper->forceStop();
-  calibRunning = false;
-  pumpState = STATE_IDLE;
-}
-
-void calibFinishRun() {
-  calibStepsRun = stepper->getCurrentPosition();
-  calibRunning = false;
-  pumpState = DONE;
-}
+void calibStopRun() { pump.calibStepsRun = stepper->getCurrentPosition(); stepper->forceStop(); pump.calibRunning = false; pump_machine_transition(STATE_IDLE); }
+void calibFinishRun() { pump.calibStepsRun = stepper->getCurrentPosition(); pump.calibRunning = false; pump_machine_transition(DONE); }
 
 void calibCalculate() {
-  if (calibActualVol > 0 && calibStepsRun > 0) {
-    calibNewSPM = (float)calibStepsRun / calibActualVol;
-    calibNewSPM = constrain(calibNewSPM, 10, 50000);
+  if (pump.calibActualVol > 0 && pump.calibStepsRun > 0) {
+    pump.calibNewSPM = (float)pump.calibStepsRun / pump.calibActualVol;
+    pump.calibNewSPM = constrain(pump.calibNewSPM, 10, 50000);
   }
 }
 
-void calibSave() {
-  stepsPerMl = calibNewSPM;
-  liquidSPM[currentLiquid] = calibNewSPM;
-  markDirty();
-  saveParams();
-}
+void calibSave() { pump.stepsPerMl = pump.calibNewSPM; pump.liquidSPM[pump.currentLiquid] = pump.calibNewSPM; markDirty(); saveParams(); }
 
-// ----- Input buffer (shared across all parameter-entry screens) -----
-char inputBuf[8] = "";
-int  inputLen    = 0;
-
-void inputClear() {
-  memset(inputBuf, 0, sizeof(inputBuf));
-  inputLen = 0;
-}
-
-void inputBackspace() {
-  if (inputLen > 0) {
-    inputBuf[--inputLen] = 0;
-  }
-}
-
-void inputAppend(char c) {
-  if (inputLen < 6) {
-    inputBuf[inputLen++] = c;
-  }
-}
-
-float inputToFloat() {
-  if (inputLen == 0) return 0;
-  return atof(inputBuf);
-}
+static char inputBuf[8] = "";
+static int  inputLen = 0;
+void inputClear() { memset(inputBuf, 0, sizeof(inputBuf)); inputLen = 0; }
+void inputBackspace() { if (inputLen > 0) inputBuf[--inputLen] = 0; }
+void inputAppend(char c) { if (inputLen < 6) inputBuf[inputLen++] = c; }
+float inputToFloat() { return (inputLen == 0) ? 0 : atof(inputBuf); }

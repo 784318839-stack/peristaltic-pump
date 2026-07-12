@@ -1,31 +1,32 @@
-/******************************************************************************
- * web_handlers.cpp - HTTP 服务实现 (WiFiServer, 无 AsyncTCP 依赖)
+﻿/******************************************************************************
+ * web_handlers.cpp - HTTP 鏈嶅姟瀹炵幇 (WiFiServer, 鏃?AsyncTCP 渚濊禆)
  *
- * 路由:
+ * 璺敱:
  *   GET  /              -> Web UI
- *   GET  /api/status    -> JSON 遥测
- *   GET  /api/cmd?c=xxx -> 命令
- *   POST /api/wifi      -> 保存 WiFi 配置 (JSON body)
- *   GET  /api/scan      -> 扫描附近 WiFi
- *   GET  /api/info      -> 网络信息 (IP / 模式 / MAC)
+ *   GET  /api/status    -> JSON 閬ユ祴
+ *   GET  /api/cmd?c=xxx -> 鍛戒护
+ *   POST /api/wifi      -> 淇濆瓨 WiFi 閰嶇疆 (JSON body)
+ *   GET  /api/scan      -> 鎵弿闄勮繎 WiFi
+ *   GET  /api/info      -> 缃戠粶淇℃伅 (IP / 妯″紡 / MAC)
  ******************************************************************************/
 #include "web_handlers.h"
 #include "command_protocol.h"
 #include "wifi_manager.h"
 #include "pump_shared.h"
+#include "pump_state.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 
 // ============================================================================
-//                            HTTP 服务器
+//                            HTTP 鏈嶅姟鍣?
 // ============================================================================
 static WiFiServer server(80);
 
-// 内嵌 Web UI
+// 鍐呭祵 Web UI
 #include "web_ui_gen.h"
 
 // ============================================================================
-//                            辅助函数
+//                            杈呭姪鍑芥暟
 // ============================================================================
 
 static void sendJson(WiFiClient &client, int code, const char* json) {
@@ -53,7 +54,7 @@ static String getQueryParam(const String &url, const char* key) {
   return url.substring(start, end);
 }
 
-// 从 headers 中提取 Content-Length
+// 浠?headers 涓彁鍙?Content-Length
 static int getContentLength(const String &headers) {
   int idx = headers.indexOf("Content-Length:");
   if (idx < 0) idx = headers.indexOf("content-length:");
@@ -66,7 +67,7 @@ static int getContentLength(const String &headers) {
 }
 
 // ============================================================================
-//                            WiFi 扫描 (异步, 不阻塞主循环)
+//                            WiFi 鎵弿 (寮傛, 涓嶉樆濉炰富寰幆)
 // ============================================================================
 
 static bool wifiScanStarted = false;
@@ -77,7 +78,7 @@ static String buildScanResultJson(int n) {
     if (i > 0) json += ",";
     json += "{\"ssid\":\"";
     String ssid = WiFi.SSID(i);
-    /* 简单转义 JSON 中的引号 */
+    /* 绠€鍗曡浆涔?JSON 涓殑寮曞彿 */
     ssid.replace("\\", "\\\\");
     ssid.replace("\"", "\\\"");
     json += ssid;
@@ -92,12 +93,12 @@ static String buildScanResultJson(int n) {
 }
 
 // ============================================================================
-//                            请求路由
+//                            璇锋眰璺敱
 // ============================================================================
 
 static void handleRequest(WiFiClient &client, const String &method,
                           const String &path, const String &body) {
-  // GET / 或 /index.html -> Web UI
+  // GET / 鎴?/index.html -> Web UI
   if (method == "GET" && (path == "/" || path.startsWith("/index.html"))) {
     sendHtml(client, 200, WEB_UI);
     return;
@@ -106,19 +107,19 @@ static void handleRequest(WiFiClient &client, const String &method,
   // GET /manifest.json
   if (method == "GET" && path.startsWith("/manifest.json")) {
     sendJson(client, 200,
-      "{\"name\":\"蠕动泵控制器\",\"short_name\":\"PumpCtrl\","
+      "{\"name\":\"锠曞姩娉垫帶鍒跺櫒\",\"short_name\":\"PumpCtrl\","
       "\"start_url\":\"/\",\"display\":\"standalone\","
       "\"background_color\":\"#0d1117\",\"theme_color\":\"#0d1117\"}");
     return;
   }
 
-  // GET /api/status -> 遥测
+  // GET /api/status -> 閬ユ祴
   if (method == "GET" && path.startsWith("/api/status")) {
     sendJson(client, 200, buildTelemetryJson());
     return;
   }
 
-  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii -> 命令
+  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii -> 鍛戒护
   if (method == "GET" && path.startsWith("/api/cmd")) {
     String cmd = getQueryParam(path, "c");
     String val = getQueryParam(path, "v");
@@ -158,7 +159,7 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // POST /api/wifi -> 保存 WiFi 配置
+  // POST /api/wifi -> 淇濆瓨 WiFi 閰嶇疆
   if (method == "POST" && path.startsWith("/api/wifi")) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, body);
@@ -187,14 +188,14 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi 扫描 (异步, 不阻塞; 前端轮询直到完成)
+  // GET /api/scan -> WiFi 鎵弿 (寮傛, 涓嶉樆濉? 鍓嶇杞鐩村埌瀹屾垚)
   if (method == "GET" && path.startsWith("/api/scan")) {
-    if (pumpState == RUNNING || pumpState == PAUSED) {
+    if (pump.state == RUNNING || pump.state == PAUSED) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
 
-    /* 首次调用: 启动异步扫描 */
+    /* 棣栨璋冪敤: 鍚姩寮傛鎵弿 */
     if (!wifiScanStarted) {
       WiFi.scanDelete();
       WiFi.scanNetworks(true, false, false, 80);  /* async=true */
@@ -203,14 +204,14 @@ static void handleRequest(WiFiClient &client, const String &method,
       return;
     }
 
-    /* 后续轮询: 检查扫描状态 */
+    /* 鍚庣画杞: 妫€鏌ユ壂鎻忕姸鎬?*/
     int scanState = WiFi.scanComplete();
     if (scanState == WIFI_SCAN_RUNNING) {
       sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
       return;
     }
 
-    wifiScanStarted = false;  /* 扫描已结束 (成功或失败) */
+    wifiScanStarted = false;  /* 鎵弿宸茬粨鏉?(鎴愬姛鎴栧け璐? */
 
     if (scanState > 0) {
       String json = "{\"ok\":true,\"done\":true,";
@@ -220,13 +221,13 @@ static void handleRequest(WiFiClient &client, const String &method,
       return;
     }
 
-    /* scanState <= 0: 失败或无网络 */
+    /* scanState <= 0: 澶辫触鎴栨棤缃戠粶 */
     WiFi.scanDelete();
     sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
     return;
   }
 
-  // GET /api/info -> 网络信息
+  // GET /api/info -> 缃戠粶淇℃伅
   if (method == "GET" && path.startsWith("/api/info")) {
     const char* mode;
     const char* ip;
@@ -248,7 +249,7 @@ static void handleRequest(WiFiClient &client, const String &method,
 }
 
 // ============================================================================
-//                            客户端处理
+//                            瀹㈡埛绔鐞?
 // ============================================================================
 
 void initWebServer() {
@@ -259,7 +260,7 @@ void handleWebClients() {
   WiFiClient client = server.accept();
   if (!client) return;
 
-  // 读取 HTTP 请求 (headers + body)
+  // 璇诲彇 HTTP 璇锋眰 (headers + body)
   unsigned long timeout = millis() + 200;
   String request;
   int contentLength = 0;
@@ -269,25 +270,25 @@ void handleWebClients() {
     if (client.available()) {
       char c = client.read();
       request += c;
-      timeout = millis() + 200;  // 每次读取重置超时
+      timeout = millis() + 200;  // 姣忔璇诲彇閲嶇疆瓒呮椂
 
       if (!headersDone) {
         if (request.endsWith("\r\n\r\n") || request.endsWith("\n\n")) {
           headersDone = true;
           contentLength = getContentLength(request);
-          if (contentLength <= 0) break;  // 无 body，结束
+          if (contentLength <= 0) break;  // 鏃?body锛岀粨鏉?
         }
       } else {
-        // 计算已读取的 body 字节数
+        // 璁＄畻宸茶鍙栫殑 body 瀛楄妭鏁?
         int headerEnd = request.indexOf("\r\n\r\n");
         if (headerEnd < 0) headerEnd = request.indexOf("\n\n");
         int bodyRead = request.length() - headerEnd - 4;
-        if (bodyRead >= contentLength) break;  // body 读取完毕
+        if (bodyRead >= contentLength) break;  // body 璇诲彇瀹屾瘯
       }
     }
   }
 
-  // 解析方法 & 路径
+  // 瑙ｆ瀽鏂规硶 & 璺緞
   int firstSpace = request.indexOf(' ');
   int secondSpace = request.indexOf(' ', firstSpace + 1);
   if (firstSpace < 0 || secondSpace < 0) { client.stop(); return; }
@@ -295,7 +296,7 @@ void handleWebClients() {
   String method = request.substring(0, firstSpace);
   String path = request.substring(firstSpace + 1, secondSpace);
 
-  // 提取 body
+  // 鎻愬彇 body
   String body;
   if (contentLength > 0) {
     int headerEnd = request.indexOf("\r\n\r\n");
