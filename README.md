@@ -2,6 +2,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。
 
+> **v2.3.4** (2026-07-18) — WiFi 全功率恢复 20dBm，热管理已解决。
 > **v2.3.2** (2026-07-12) — PumpState 结构体重构，pump_machine 状态机模块提取，架构更清晰。
 > **v2.2** (2026-07-08) — PSRAM 全面启用，WiFi AP+STA 双模，堵转检测，密码加密存储，多项 UI 优化和热管理。
 > **v2.1** (2026-07-06) — Web UI 改用 HTTP 轮询（取代 WebSocket），修复压缩后 `//` 注释破坏 JS 的 bug。
@@ -244,7 +245,7 @@ Mode:   MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 | USB CDC On Boot | **Disabled** |
 | Partition Scheme | **Huge APP (3MB No OTA/1MB SPIFFS)** |
 | Flash Size | **16MB (128Mb)** |
-| CPU Frequency | **160 MHz** (降频降温) |
+| CPU Frequency | **160 MHz** |
 | 串口波特率 | **115200** |
 
 ### 内存布局
@@ -324,6 +325,11 @@ peristaltic_pump/
 
 ## 更新日志
 
+### v2.3.4 (2026-07-18)
+
+**WiFi:**
+- WiFi TX 功率恢复 20dBm 全功率（热管理问题已解决，无需再限制 8dBm）
+
 ### v2.3.2 (2026-07-12)
 
 **架构重构:**
@@ -375,7 +381,6 @@ peristaltic_pump/
 
 **热管理:**
 - CPU 从 240MHz 降至 160MHz
-- WiFi TX 功率从 20dBm 降至 8dBm
 
 **修复:**
 - DONE 状态可重新启动 (不再卡 'Pump not idle')
