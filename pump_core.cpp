@@ -117,6 +117,7 @@ void calibStartRun() {
   if (pump.calibTargetVol <= 0) return;
   ensureStepperOn(); updateStepperSpeed();
   pump.dispensedVolume = 0;
+  pump.targetVolume = pump.calibTargetVol;  // 让遥测 progress 反映校准进度
   int32_t totalSteps = (int32_t)(pump.calibTargetVol * pump.stepsPerMl);
   stepper->setCurrentPosition(0); stepper->moveTo(totalSteps);
   pump.calibRunning = true;

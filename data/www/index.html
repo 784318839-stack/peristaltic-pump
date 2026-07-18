@@ -422,6 +422,13 @@ function updateUI(d) {
     if (uiStep !== currentStep) {
       updateCalibSteps(uiStep);
     }
+    /* 校准运行步骤 — 实时更新进度条 */
+    if (uiStep === 2) {
+      var pb = $('#calibRunProgress');
+      if (pb) pb.style.width = d.progress + '%';
+      var cd = $('#calibRunDisp');
+      if (cd) cd.textContent = d.dispensed.toFixed(1) + ' / ' + d.targetVol.toFixed(1) + ' mL';
+    }
   }
 
   if (d.wifiMode) {
@@ -509,7 +516,10 @@ function updateCalibSteps(step) {
       b2.textContent = '跳过'; b2.onclick = () => sendCmd('calib_abort');
       break;
     case 2:
-      content.innerHTML = '<p style="color:var(--text2)">第 3/5 步: 泵正在运行中...</p><p style="color:var(--accent);font-size:14px">可手动停止或等它自动完成</p>';
+      content.innerHTML = '<p style="color:var(--text2)">第 3/5 步: 泵正在运行中...</p>'
+        + '<div class="progress-bar" style="margin:10px 0"><div class="progress-fill" id="calibRunProgress" style="width:0%"></div></div>'
+        + '<div style="text-align:center;font-size:12px;color:var(--text2)" id="calibRunDisp">-- / -- mL</div>'
+        + '<p style="color:var(--accent);font-size:13px;margin-top:8px">可手动停止或等它自动完成</p>';
       b1.textContent = '启动运行'; b1.onclick = () => sendCmd('calib_start_run');
       b2.textContent = '手动停止'; b2.onclick = () => sendCmd('calib_stop_run');
       break;
