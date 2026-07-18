@@ -55,7 +55,7 @@ void setup() {
   stepper = stepperEngine.stepperConnectToPin(STEP_PIN);
   if (stepper) {
     stepper->setDirectionPin(DIR_PIN);
-    stepper->setEnablePin(ENA_PIN);
+    stepper->setEnablePin(ENA_PIN, false); // 6N137 反相: LOW=使能
     stepper->setAutoEnable(true);
     stepper->enableOutputs();
     pump.stepperEnabled = true;
