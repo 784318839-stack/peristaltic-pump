@@ -39,7 +39,7 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define ACCEL_FACTOR  0.3f
 #define COMPLETIONS_PER_SAVE 10
 
-constexpr const char* LIQUID_NAMES[NUM_LIQUIDS] = { "Wtr", "Thk", "Org", "Cst" };
+constexpr const char* LIQUID_NAMES[NUM_LIQUIDS] = { "Wtr", "Thk", "Liq1", "Liq2" };
 
 // ============================================================================
 //                      Hardware object externs

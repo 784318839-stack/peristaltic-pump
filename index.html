@@ -462,7 +462,7 @@ $$('.mode-tab').forEach(tab => {
   });
 });
 
-const liquidNames = ['水', '粘稠', '有机', '自定义'];
+const liquidNames = ['水', '粘稠', '液体1', '液体2'];
 function buildLiquidRow(idx) {
   const row = $('#liquidRow');
   row.innerHTML = '';
@@ -505,12 +505,14 @@ function updateCalibSteps(step) {
 
   buttons.style.display = '';
   const b1 = $('#calibBtn1'), b2 = $('#calibBtn2');
+  b1.style.display = ''; b2.style.display = '';
 
   switch (step) {
     case 0:
-      content.innerHTML = '<p style="color:var(--text2)">第 1/5 步: 选择要校准的液体</p>';
-      b1.textContent = '选水'; b1.onclick = () => sendCmd('calib_select_liquid', {index:0});
-      b2.textContent = '选粘稠'; b2.onclick = () => sendCmd('calib_select_liquid', {index:1});
+      content.innerHTML = '<p style="color:var(--text2);margin-bottom:8px">第 1/5 步: 选择要校准的液体</p>'
+        + liquidNames.map((n, i) => '<button class="btn-action" style="flex:1;margin:2px" onclick="sendCmd(\'calib_select_liquid\',{index:' + i + '})">' + n + '</button>').join('');
+      b1.textContent = ''; b1.onclick = null; b1.style.display = 'none';
+      b2.textContent = ''; b2.onclick = null; b2.style.display = 'none';
       break;
     case 1:
       content.innerHTML = '<p style="color:var(--text2)">第 2/5 步: 设定校准体积</p><input type="number" id="calibVol" value="' + lastCalibTargetVol + '" step="0.1" min="0.1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:14px;margin-top:6px">';

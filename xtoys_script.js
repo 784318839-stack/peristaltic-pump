@@ -36,7 +36,7 @@
         { id:"liquid", type:"select", name:"液体", variable:"liquidIdx",
           options:[
             {label:"水",value:0},{label:"粘稠",value:1},
-            {label:"有机",value:2},{label:"自定义",value:3}
+            {label:"液体1",value:2},{label:"液体2",value:3}
           ], default:0 },
 
         { id:"flow",   type:"slider", name:"流量 mL/min", variable:"flowRate",
