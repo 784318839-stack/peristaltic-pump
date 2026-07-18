@@ -419,7 +419,9 @@ function updateUI(d) {
 
   if (d.calibStep !== undefined && d.calibStep >= 0) {
     var uiStep = d.calibStep - 1;
-    updateCalibSteps(uiStep);
+    if (uiStep !== currentStep) {
+      updateCalibSteps(uiStep);
+    }
   }
 
   if (d.wifiMode) {
