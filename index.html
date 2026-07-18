@@ -135,26 +135,18 @@ button:active{transform:scale(.95);opacity:.8}
     <h2>参数设置</h2>
     <div id="paramVolume">
       <div class="input-row">
-        <label>流量</label><input type="number" id="inFlow" value="50" step="0.1" min="0.1" max="2000"><span class="unit">mL/min</span>
+        <label>流量</label><input type="number" id="inFlow" value="50" step="0.1" min="0.1" max="2000" onchange="sendCmd('set_flow',{value:parseFloat(this.value)})"><span class="unit">mL/min</span>
       </div>
       <div class="input-row">
-        <label>体积</label><input type="number" id="inVolume" value="10" step="0.1" min="0.1" max="999.9"><span class="unit">mL</span>
-      </div>
-      <div class="btn-row">
-        <button class="btn-action" onclick="sendCmd('set_flow',{value:parseFloat($('#inFlow').value)})">应用流量</button>
-        <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inVolume').value)})">应用体积</button>
+        <label>体积</label><input type="number" id="inVolume" value="10" step="0.1" min="0.1" max="999.9" onchange="sendCmd('set_volume',{value:parseFloat(this.value)})"><span class="unit">mL</span>
       </div>
     </div>
     <div id="paramTime" style="display:none">
       <div class="input-row">
-        <label>体积</label><input type="number" id="inTimeVol" value="10" step="0.1" min="0.1" max="999.9"><span class="unit">mL</span>
+        <label>体积</label><input type="number" id="inTimeVol" value="10" step="0.1" min="0.1" max="999.9" onchange="sendCmd('set_volume',{value:parseFloat(this.value)})"><span class="unit">mL</span>
       </div>
       <div class="input-row">
-        <label>时间</label><input type="number" id="inTimeSec" value="30" step="1" min="1" max="86400"><span class="unit">秒</span>
-      </div>
-      <div class="btn-row">
-        <button class="btn-action" onclick="sendCmd('set_volume',{value:parseFloat($('#inTimeVol').value)})">应用体积</button>
-        <button class="btn-action" onclick="sendCmd('set_time',{value:parseFloat($('#inTimeSec').value)})">应用时间</button>
+        <label>时间</label><input type="number" id="inTimeSec" value="30" step="1" min="1" max="86400" onchange="sendCmd('set_time',{value:parseFloat(this.value)})"><span class="unit">秒</span>
       </div>
     </div>
     <div id="paramJet" style="display:none">
@@ -540,13 +532,6 @@ function updateCalibSteps(step) {
       b2.textContent = '退出'; b2.onclick = () => sendCmd('calib_abort');
       break;
   }
-}
-
-function applyJetParams() {
-  sendCmd('set_jet_vol', {value: parseFloat($('#inJetVol').value)});
-  sendCmd('set_jet_interval', {value: parseFloat($('#inJetInt').value)});
-  sendCmd('set_jet_flow', {value: parseFloat($('#inJetFlow').value)});
-  sendCmd('set_jet_pressure', {value: parseFloat($('#inJetPres').value)});
 }
 
 function buildPresetSlots() {
