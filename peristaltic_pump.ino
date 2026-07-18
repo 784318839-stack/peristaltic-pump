@@ -56,7 +56,8 @@ void setup() {
   if (stepper) {
     stepper->setDirectionPin(DIR_PIN);
     stepper->setEnablePin(ENA_PIN);
-    stepper->setAutoEnable(true);
+    // 不用 setAutoEnable, 6N137+上拉下时序会触发 DM542 报警
+    // 改用手动: enableOutputs/disableOutputs + checkIdleDisable() 5s 空闲断电
     stepper->enableOutputs();
     pump.stepperEnabled = true;
   }
