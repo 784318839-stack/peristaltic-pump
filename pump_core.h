@@ -14,7 +14,6 @@ void  updateStepperSpeed();
 
 // ---- 使能管理 ----
 void ensureStepperOn();
-void checkIdleDisable();
 
 // ---- 泵状态机 ----
 void startPump();

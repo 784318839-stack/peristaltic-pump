@@ -62,8 +62,6 @@ static void tick_running() {
     } else {
       unsigned long elapsed = millis() - pump.jetWaitStart;
       unsigned long intervalMs = (unsigned long)(pump.jetInterval * 1000);
-      if (pump.jetInterval > 15 && pump.stepperEnabled) { digitalWrite(ENA_PIN, LOW); pump.stepperEnabled = false; beepDisable(); }
-      if (!pump.stepperEnabled && pump.jetInterval > 15 && elapsed >= intervalMs - 2000) { digitalWrite(ENA_PIN, HIGH); pump.stepperEnabled = true; }
       if (elapsed >= intervalMs) startJetSquirt();
     }
     return;
@@ -95,7 +93,7 @@ static void tick_running() {
 
   int32_t curPos = stepper->getCurrentPosition();
   if (curPos != pump.stallLastPosition) { pump.stallLastPosition = curPos; pump.stallCheckTime = millis(); }
-  else if (millis() - pump.stallCheckTime > STALL_TIMEOUT_MS) { stepper->forceStop(); digitalWrite(ENA_PIN, LOW); pump.stepperEnabled = false; pump_machine_transition(STALL_ERROR); }
+  else if (millis() - pump.stallCheckTime > STALL_TIMEOUT_MS) { stepper->forceStop(); pump.stepperEnabled = false; pump_machine_transition(STALL_ERROR); }
 }
 
 static void tick_anti_drip() {

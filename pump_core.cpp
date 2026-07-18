@@ -17,21 +17,9 @@ void updateStepperSpeed() {
 }
 
 void ensureStepperOn() {
-  if (!pump.stepperEnabled) {
-    digitalWrite(ENA_PIN, HIGH); /* ENA 使能 */
-    pump.stepperEnabled = true;
-  }
+  // ENA 始终 HIGH (DM542 不支持运行时切使能, 半流待机降温)
+  pump.stepperEnabled = true;
   pump.lastStepperActivity = millis();
-}
-
-void checkIdleDisable() {
-  if (pump.stepperEnabled
-      && (pump.state == STATE_IDLE || pump.state == PAUSED)
-      && millis() - pump.lastStepperActivity > IDLE_DISABLE_MS) {
-    digitalWrite(ENA_PIN, LOW); /* ENA 断电 */
-    pump.stepperEnabled = false;
-    beepDisable();
-  }
 }
 
 void startPump() {
