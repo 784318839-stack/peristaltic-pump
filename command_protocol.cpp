@@ -289,8 +289,10 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "calib_set_vol" ) == 0 ) {
-    if ( pump.currentMenu != CALIBRATE || pump.calibStep != CALIB_SET_VOL )
-      return errResponse( cmd, "Not at calib set volume step" );
+    if ( pump.currentMenu != CALIBRATE )
+      return errResponse( cmd, "Not in calibration menu" );
+    if ( pump.calibStep != CALIB_SET_VOL && pump.calibStep != CALIB_SELECT_LIQUID )
+      return errResponse( cmd, "Calib not ready for volume input" );
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 0.1 || val > 99999 )
       return errResponse( cmd, "Volume out of range ( 0.1 - 99999 )" );
