@@ -55,10 +55,9 @@ void setup() {
   stepper = stepperEngine.stepperConnectToPin(STEP_PIN);
   if (stepper) {
     stepper->setDirectionPin(DIR_PIN);
-    stepper->setEnablePin(ENA_PIN);
-    // 不用 setAutoEnable, 6N137+上拉下时序会触发 DM542 报警
-    // 改用手动: enableOutputs/disableOutputs + checkIdleDisable() 5s 空闲断电
-    stepper->enableOutputs();
+    // ENA 手动 GPIO 控制 (6N137+上拉: HIGH=使能, LOW=断电)
+    // 不用 FastAccelStepper 的 enableOutputs, 避免时序触发 DM542 报警
+    digitalWrite(ENA_PIN, HIGH);
     pump.stepperEnabled = true;
   }
   pump.lastStepperActivity = millis();
