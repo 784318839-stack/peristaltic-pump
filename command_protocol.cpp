@@ -554,6 +554,7 @@ const char* buildTelemetryJson() {
     "\"liquidIdx\":%d,"
     "\"flow\":%.1f,"
     "\"targetVol\":%.1f,"
+    "\"calibTargetVol\":%.1f,"
     "\"targetTime\":%.1f,"
     "\"dispensed\":%.2f,"
     "\"elapsed\":%lu,"
@@ -580,7 +581,7 @@ const char* buildTelemetryJson() {
     ( unsigned long )millis(),
     stateStr, menuStr, modeStr,
     LIQUID_NAMES[ pump.currentLiquid ], pump.currentLiquid,
-    pump.flowRate, pump.targetVolume, pump.targetTime,
+    pump.flowRate, pump.targetVolume, pump.calibTargetVol, pump.targetTime,
     pump.dispensedVolume, elapsed, progress,
     pump.totalDispensed, tubePct,
     ( pump.mode == MODE_JET ) ? pump.jetCount : 0,
