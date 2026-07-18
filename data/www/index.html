@@ -46,6 +46,7 @@ button:active{transform:scale(.95);opacity:.8}
 /* Mode tabs */
 .mode-tabs{display:flex;gap:4px;margin-bottom:12px}
 .mode-tab{flex:1;text-align:center;padding:10px 6px;border-radius:8px;font-size:13px;font-weight:600;background:var(--border);color:var(--text2);cursor:pointer;transition:all .15s}
+.mode-tab.active{background:var(--accent);color:#fff}
 /* Input */
 .input-row{display:flex;gap:6px;align-items:center;margin:8px 0}
 .input-row label{font-size:13px;color:var(--text2);min-width:50px;text-align:right}
@@ -379,6 +380,8 @@ function updateUI(d) {
   $('#paramVolume').style.display = (d.mode === 'VOLUME') ? '' : 'none';
   $('#paramTime').style.display = (d.mode === 'TIME') ? '' : 'none';
   $('#paramJet').style.display = (d.mode === 'JET') ? '' : 'none';
+
+  $$('.mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === d.mode));
 
   const isIdle = d.state === 'IDLE';
   const isRunning = d.state === 'RUNNING';
