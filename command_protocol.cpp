@@ -178,7 +178,7 @@ const char* parseAndExecute( const char* json ) {
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 0.1 || val > 2000.0 )
       return errResponse( cmd, "Value out of range ( 0.1 - 2000 )" );
-    pump.flowRate = constrain( val, 0.1f, 2000.0f );
+    pump.flowRate = constrain( val, 0.1f, 9999.0f );
     updateStepperSpeed();
     pump.currentMenu = MAIN;
     markDirty();
@@ -236,7 +236,7 @@ const char* parseAndExecute( const char* json ) {
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 10 || val > 2000.0 )
       return errResponse( cmd, "Value out of range ( 10 - 2000 )" );
-    pump.jetFlowRate = constrain( val, 10.0f, 2000.0f );
+    pump.jetFlowRate = constrain( val, 10.0f, 9999.0f );
     markDirty();
     beepConfirm();
     return okResponse( cmd );

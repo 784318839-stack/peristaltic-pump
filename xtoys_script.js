@@ -40,7 +40,7 @@
           ], default:0 },
 
         { id:"flow",   type:"slider", name:"流量 mL/min", variable:"flowRate",
-          min:0.1, max:2000, step:1, default:50 },
+          min:0.1, max:9999, step:1, default:50 },
 
         { id:"volume", type:"slider", name:"目标体积 mL", variable:"targetVol",
           min:0.1, max:500, step:1, default:10 },

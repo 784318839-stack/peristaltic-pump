@@ -26,7 +26,7 @@ void startPump() {
   if (pump.mode == MODE_TIME) {
     if (pump.targetVolume <= 0 || pump.targetTime <= 0) return;
     float calcFlow = pump.targetVolume / (pump.targetTime / 60.0);
-    pump.flowRate = constrain(calcFlow, 0.1, 2000.0);
+    pump.flowRate = constrain(calcFlow, 0.1, 9999.0);
   } else {
     if (pump.flowRate <= 0 || pump.targetVolume <= 0) return;
   }

@@ -136,7 +136,7 @@ button:active{transform:scale(.95);opacity:.8}
     <h2>参数设置</h2>
     <div id="paramVolume">
       <div class="input-row">
-        <label>流量</label><input type="number" id="inFlow" value="50" step="0.1" min="0.1" max="2000" onchange="sendCmd('set_flow',{value:parseFloat(this.value)})"><span class="unit">mL/min</span>
+        <label>流量</label><input type="number" id="inFlow" value="50" step="0.1" min="0.1" max="9999" onchange="sendCmd('set_flow',{value:parseFloat(this.value)})"><span class="unit">mL/min</span>
       </div>
       <div class="input-row">
         <label>体积</label><input type="number" id="inVolume" value="10" step="0.1" min="0.1" max="999.9" onchange="sendCmd('set_volume',{value:parseFloat(this.value)})"><span class="unit">mL</span>
@@ -154,7 +154,7 @@ button:active{transform:scale(.95);opacity:.8}
       <div class="jet-grid">
         <div><label>单次量 mL</label><input type="number" id="inJetVol" value="1" step="0.1" min="0.1" max="10" onchange="sendCmd('set_jet_vol',{value:parseFloat(this.value)})"></div>
         <div><label>间隔 秒</label><input type="number" id="inJetInt" value="3" step="1" min="1" max="60" onchange="sendCmd('set_jet_interval',{value:parseFloat(this.value)})"></div>
-        <div><label>流量 mL/min</label><input type="number" id="inJetFlow" value="200" step="1" min="10" max="2000" onchange="sendCmd('set_jet_flow',{value:parseFloat(this.value)})"></div>
+        <div><label>流量 mL/min</label><input type="number" id="inJetFlow" value="200" step="1" min="10" max="9999" onchange="sendCmd('set_jet_flow',{value:parseFloat(this.value)})"></div>
         <div><label>压力 1-10</label><input type="number" id="inJetPres" value="5" step="1" min="1" max="10" onchange="sendCmd('set_jet_pressure',{value:parseFloat(this.value)})"></div>
       </div>
     </div>

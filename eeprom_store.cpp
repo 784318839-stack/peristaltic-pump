@@ -57,14 +57,14 @@ bool loadParams() {
   EEPROM.get(EEPROM_ADDR + 60, pump.jetPressure);
 
   pump.stepsPerMl    = constrain(pump.stepsPerMl,    10, 50000);
-  pump.flowRate      = constrain(pump.flowRate,      0.1, 2000.0);
+  pump.flowRate      = constrain(pump.flowRate,      0.1, 9999.0);
   pump.targetVolume  = constrain(pump.targetVolume,  0.1, 99999);
   pump.targetTime    = constrain(pump.targetTime,    1, 86400);
   pump.antiDripVol   = constrain(pump.antiDripVol,   0, 5.0);
   pump.tubeLifeML    = constrain(pump.tubeLifeML,    0, 200000);
   pump.jetVolume     = constrain(pump.jetVolume,     0.1, 10.0);
   pump.jetInterval   = constrain(pump.jetInterval,   1, 60);
-  pump.jetFlowRate   = constrain(pump.jetFlowRate,   10, 2000.0);
+  pump.jetFlowRate   = constrain(pump.jetFlowRate,   10, 9999.0);
   pump.jetPressure   = constrain(pump.jetPressure,   1, 10);
   for (int i = 0; i < NUM_LIQUIDS; i++)
     pump.liquidSPM[i] = constrain(pump.liquidSPM[i], 10, 50000);
@@ -105,12 +105,12 @@ void loadPreset(int slot) {
   EEPROM.get(base + 18, pump.jetInterval);
   EEPROM.get(base + 22, pump.jetFlowRate);
   EEPROM.get(base + 26, pump.jetPressure);
-  pump.flowRate     = constrain(pump.flowRate,     0.1, 2000.0);
+  pump.flowRate     = constrain(pump.flowRate,     0.1, 9999.0);
   pump.targetVolume = constrain(pump.targetVolume, 0.1, 99999);
   pump.targetTime   = constrain(pump.targetTime,   1, 86400);
   pump.jetVolume    = constrain(pump.jetVolume,    0.1, 10.0);
   pump.jetInterval  = constrain(pump.jetInterval,  1, 60);
-  pump.jetFlowRate  = constrain(pump.jetFlowRate,  10, 2000.0);
+  pump.jetFlowRate  = constrain(pump.jetFlowRate,  10, 9999.0);
   pump.jetPressure  = constrain(pump.jetPressure,  1, 10);
   pump.stepsPerMl   = pump.liquidSPM[pump.currentLiquid];
   markDirty();
