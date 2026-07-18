@@ -36,7 +36,7 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define EEPROM_ADDR   0
 #define PRESET_BASE   64
 #define PRESET_SIZE   30
-#define ACCEL_FACTOR  0.5f
+#define ACCEL_FACTOR  0.3f
 #define COMPLETIONS_PER_SAVE 10
 
 constexpr const char* LIQUID_NAMES[NUM_LIQUIDS] = { "Wtr", "Thk", "Org", "Cst" };
