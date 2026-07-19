@@ -67,8 +67,11 @@ static int getContentLength(const String &headers) {
 }
 
 // ============================================================================
-//                            WiFi 鎵弿 (寮傛, 涓嶉樆濉炰富寰幆)
+//                            WiFi scan (async, STA-only, coordinated)
 // ============================================================================
+
+static enum { SCAN_IDLE, SCAN_RUNNING } scanState = SCAN_IDLE;
+static unsigned long scanStartMs = 0;
 
 static String buildScanResultJson(int n) {
   String json = "{\"networks\":[";
@@ -186,25 +189,49 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi scan (STA-only mode, then restore AP+STA)
+  // GET /api/scan -> WiFi scan (STA-only async, restore AP+STA on complete)
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pump.state == RUNNING || pump.state == PAUSED) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
 
-    /* Switch to STA-only, scan, restore AP+STA */
-    const char* apSsid = getApSSID();
-    WiFi.mode(WIFI_STA);
-    delay(50);
-    WiFi.scanDelete();
-    int n = WiFi.scanNetworks(false, false, false, 100);
-    WiFi.scanDelete();
+    if (scanState == SCAN_IDLE) {
+      /* Start: switch to STA-only, launch async scan */
+      const char* apSsid = getApSSID();
+      WiFi.mode(WIFI_STA);
+      delay(100);
+      WiFi.scanDelete();
+      WiFi.scanNetworks(true, false, false, 100);  /* async */
+      scanState = SCAN_RUNNING;
+      scanStartMs = millis();
+      (void)apSsid;  /* saved for restore */
+      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
+      return;
+    }
 
-    /* Restore AP+STA */
+    /* Polling: check async scan status */
+    int n = WiFi.scanComplete();
+
+    if (n == WIFI_SCAN_RUNNING) {
+      /* Timeout after 12s */
+      if (millis() - scanStartMs > 12000) {
+        WiFi.scanDelete();
+        scanState = SCAN_IDLE;
+        sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
+        return;
+      }
+      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
+      return;
+    }
+
+    /* Scan complete - restore AP+STA */
+    const char* apSsid = getApSSID();
+    WiFi.scanDelete();
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(apSsid, "12345678", 1, 0, 2);
     delay(100);
+    scanState = SCAN_IDLE;
 
     if (n > 0) {
       String json = "{\"ok\":true,\"done\":true,";
