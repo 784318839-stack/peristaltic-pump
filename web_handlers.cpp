@@ -71,6 +71,7 @@ static int getContentLength(const String &headers) {
 // ============================================================================
 
 static bool wifiScanStarted = false;
+static unsigned long wifiScanStartMs = 0;
 
 static String buildScanResultJson(int n) {
   String json = "{\"networks\":[";
@@ -195,11 +196,12 @@ static void handleRequest(WiFiClient &client, const String &method,
       return;
     }
 
-    /* 棣栨璋冪敤: 鍚姩寮傛鎵弿 */
-    if (!wifiScanStarted) {
+    /* 首次调用或超时: 启动异步扫描 */
+    if (!wifiScanStarted || (millis() - wifiScanStartMs > 10000)) {
       WiFi.scanDelete();
-      WiFi.scanNetworks(true, false, false, 80);  /* async=true */
+      WiFi.scanNetworks(true, false, false, 120);  /* async, 120ms/ch */
       wifiScanStarted = true;
+      wifiScanStartMs = millis();
       sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
       return;
     }
