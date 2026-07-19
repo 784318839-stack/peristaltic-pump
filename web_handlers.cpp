@@ -198,7 +198,7 @@ static void handleRequest(WiFiClient &client, const String &method,
 
     if (scanState == SCAN_IDLE) {
       WiFi.scanDelete();
-      int16_t ret = WiFi.scanNetworks(true, false, false, 120);  /* async */
+      int16_t ret = WiFi.scanNetworks(true, false, true, 200);  /* async, passive */
       Serial.printf("[SCAN] scanNetworks returned: %d\n", ret);
       scanState = SCAN_RUNNING;
       scanStartMs = millis();
