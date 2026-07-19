@@ -70,7 +70,8 @@ static int getContentLength(const String &headers) {
 //                            WiFi 鎵弿 (寮傛, 涓嶉樆濉炰富寰幆)
 // ============================================================================
 
-static unsigned long lastScanDoneMs = 0;
+static bool wifiScanStarted = false;
+static unsigned long wifiScanStartMs = 0;
 
 static String buildScanResultJson(int n) {
   String json = "{\"networks\":[";
@@ -188,35 +189,38 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi scan (sync, 3s debounce)
+  // GET /api/scan -> WiFi scan (async, passive to avoid AP drop)
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pump.state == RUNNING || pump.state == PAUSED) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
 
-    /* 3s debounce: prevent duplicate sync scans from frontend polling */
-    if (millis() - lastScanDoneMs < 3000) {
-      sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
+    /* Start async scan (passive: no TX probe, won't disrupt AP) */
+    if (!wifiScanStarted || (millis() - wifiScanStartMs > 15000)) {
+      WiFi.scanDelete();
+      WiFi.scanNetworks(true, false, true, 200);  /* async, passive, 200ms/ch */
+      wifiScanStarted = true;
+      wifiScanStartMs = millis();
+      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
       return;
     }
 
-    WiFi.scanDelete();
     int n = WiFi.scanComplete();
     if (n == WIFI_SCAN_RUNNING) {
       sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
       return;
     }
 
-    n = WiFi.scanNetworks(false, false, false, 120);
-    WiFi.scanDelete();
-    lastScanDoneMs = millis();
+    wifiScanStarted = false;
 
     if (n > 0) {
       String json = "{\"ok\":true,\"done\":true,";
       json += buildScanResultJson(n).substring(1);
+      WiFi.scanDelete();
       sendJson(client, 200, json.c_str());
     } else {
+      WiFi.scanDelete();
       sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
     }
     return;
