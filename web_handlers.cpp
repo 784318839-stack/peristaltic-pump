@@ -196,10 +196,12 @@ static void handleRequest(WiFiClient &client, const String &method,
       return;
     }
 
-    /* Start async scan (passive: no TX probe, won't disrupt AP) */
+    /* Start async scan: disconnect STA first to free radio */
     if (!wifiScanStarted || (millis() - wifiScanStartMs > 15000)) {
+      WiFi.disconnect();  /* stop any ongoing STA connect, free radio for scan */
+      delay(50);
       WiFi.scanDelete();
-      WiFi.scanNetworks(true, false, true, 200);  /* async, passive, 200ms/ch */
+      WiFi.scanNetworks(true, false, false, 120);  /* async, active, 120ms/ch */
       wifiScanStarted = true;
       wifiScanStartMs = millis();
       sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
