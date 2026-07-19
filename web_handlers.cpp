@@ -221,7 +221,7 @@ static void handleRequest(WiFiClient &client, const String &method,
     }
     return;
   }
-startsWith("/api/info")) {
+  if (method == "GET" && path.startsWith("/api/info")) {
     const char* mode;
     const char* ip;
     int clients;
