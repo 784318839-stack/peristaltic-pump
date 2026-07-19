@@ -70,8 +70,7 @@ static int getContentLength(const String &headers) {
 //                            WiFi 鎵弿 (寮傛, 涓嶉樆濉炰富寰幆)
 // ============================================================================
 
-static bool wifiScanStarted = false;
-static unsigned long wifiScanStartMs = 0;
+static unsigned long lastScanDoneMs = 0;
 
 static String buildScanResultJson(int n) {
   String json = "{\"networks\":[";
@@ -189,48 +188,40 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi 鎵弿 (寮傛, 涓嶉樆濉? 鍓嶇杞鐩村埌瀹屾垚)
+  // GET /api/scan -> WiFi scan (sync, 3s debounce)
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pump.state == RUNNING || pump.state == PAUSED) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
 
-    /* 首次调用或超时: 启动异步扫描 */
-    if (!wifiScanStarted || (millis() - wifiScanStartMs > 10000)) {
-      WiFi.scanDelete();
-      WiFi.scanNetworks(true, false, false, 120);  /* async, 120ms/ch */
-      wifiScanStarted = true;
-      wifiScanStartMs = millis();
-      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
+    /* 3s debounce: prevent duplicate sync scans from frontend polling */
+    if (millis() - lastScanDoneMs < 3000) {
+      sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
       return;
     }
 
-    /* 鍚庣画杞: 妫€鏌ユ壂鎻忕姸鎬?*/
-    int scanState = WiFi.scanComplete();
-    if (scanState == WIFI_SCAN_RUNNING) {
-      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
-      return;
-    }
-
-    wifiScanStarted = false;  /* 鎵弿宸茬粨鏉?(鎴愬姛鎴栧け璐? */
-
-    if (scanState > 0) {
-      String json = "{\"ok\":true,\"done\":true,";
-      json += buildScanResultJson(scanState).substring(1);
-      WiFi.scanDelete();
-      sendJson(client, 200, json.c_str());
-      return;
-    }
-
-    /* scanState <= 0: 澶辫触鎴栨棤缃戠粶 */
     WiFi.scanDelete();
-    sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
+    int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_RUNNING) {
+      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
+      return;
+    }
+
+    n = WiFi.scanNetworks(false, false, false, 120);
+    WiFi.scanDelete();
+    lastScanDoneMs = millis();
+
+    if (n > 0) {
+      String json = "{\"ok\":true,\"done\":true,";
+      json += buildScanResultJson(n).substring(1);
+      sendJson(client, 200, json.c_str());
+    } else {
+      sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
+    }
     return;
   }
-
-  // GET /api/info -> 缃戠粶淇℃伅
-  if (method == "GET" && path.startsWith("/api/info")) {
+startsWith("/api/info")) {
     const char* mode;
     const char* ip;
     int clients;
