@@ -70,9 +70,6 @@ static int getContentLength(const String &headers) {
 //                            WiFi 鎵弿 (寮傛, 涓嶉樆濉炰富寰幆)
 // ============================================================================
 
-static bool wifiScanStarted = false;
-static unsigned long wifiScanStartMs = 0;
-
 static String buildScanResultJson(int n) {
   String json = "{\"networks\":[";
   for (int i = 0; i < n && i < 20; i++) {
@@ -189,40 +186,33 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi scan (async, passive to avoid AP drop)
+  // GET /api/scan -> WiFi scan (STA-only mode, then restore AP+STA)
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pump.state == RUNNING || pump.state == PAUSED) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
 
-    /* Start async scan: disconnect STA first to free radio */
-    if (!wifiScanStarted || (millis() - wifiScanStartMs > 15000)) {
-      WiFi.disconnect();  /* stop any ongoing STA connect, free radio for scan */
-      delay(50);
-      WiFi.scanDelete();
-      WiFi.scanNetworks(true, false, false, 120);  /* async, active, 120ms/ch */
-      wifiScanStarted = true;
-      wifiScanStartMs = millis();
-      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
-      return;
-    }
+    /* Switch to STA-only, scan, restore AP+STA */
+    const char* apSsid = getApSSID();
+    WiFi.mode(WIFI_STA);
+    delay(50);
+    WiFi.scanDelete();
+    int n = WiFi.scanNetworks(false, false, false, 100);
+    WiFi.scanDelete();
 
-    int n = WiFi.scanComplete();
-    if (n == WIFI_SCAN_RUNNING) {
-      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
-      return;
-    }
-
-    wifiScanStarted = false;
+    /* Restore AP+STA */
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(apSsid, "12345678", 1, 0, 2);
+    esp_wifi_set_max_tx_power(80);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    delay(100);
 
     if (n > 0) {
       String json = "{\"ok\":true,\"done\":true,";
       json += buildScanResultJson(n).substring(1);
-      WiFi.scanDelete();
       sendJson(client, 200, json.c_str());
     } else {
-      WiFi.scanDelete();
       sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
     }
     return;

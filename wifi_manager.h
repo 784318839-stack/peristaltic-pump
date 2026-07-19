@@ -33,6 +33,7 @@ void wifiMaintain();
 // 获取当前 WiFi 状态 (用于遥测)
 // 返回 JSON 片段, 如: "ap", "192.168.4.1", 1
 void getWiFiStatus(const char*& mode, const char*& ip, int& clientCount);
+const char* getApSSID();
 
 // EEPROM WiFi 配置读写
 bool loadWiFiConfig(WiFiConfig& cfg);

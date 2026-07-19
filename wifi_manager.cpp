@@ -120,6 +120,10 @@ void getWiFiStatus(const char*& mode, const char*& ip, int& clientCount) {
   clientCount = WiFi.softAPgetStationNum();
 }
 
+const char* getApSSID() {
+  return apSSID.c_str();
+}
+
 bool loadWiFiConfig(WiFiConfig& cfg) {
   uint16_t magic;
   EEPROM.get(WIFI_EEPROM_BASE, magic);
