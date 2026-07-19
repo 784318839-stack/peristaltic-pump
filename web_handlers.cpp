@@ -189,7 +189,7 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi scan (STA-only async, restore AP+STA on complete)
+  // GET /api/scan -> WiFi async scan (AP+STA mode, no AP drop)
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pump.state == RUNNING || pump.state == PAUSED) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
@@ -197,27 +197,23 @@ static void handleRequest(WiFiClient &client, const String &method,
     }
 
     if (scanState == SCAN_IDLE) {
-      /* Start: switch to STA-only, launch async scan */
-      const char* apSsid = getApSSID();
-      WiFi.mode(WIFI_STA);
-      delay(100);
       WiFi.scanDelete();
-      WiFi.scanNetworks(true, false, false, 100);  /* async */
+      int16_t ret = WiFi.scanNetworks(true, false, false, 120);  /* async */
+      Serial.printf("[SCAN] scanNetworks returned: %d\n", ret);
       scanState = SCAN_RUNNING;
       scanStartMs = millis();
-      (void)apSsid;  /* saved for restore */
       sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
       return;
     }
 
-    /* Polling: check async scan status */
     int n = WiFi.scanComplete();
+    Serial.printf("[SCAN] scanComplete: %d, elapsed: %lu ms\n", n, millis() - scanStartMs);
 
     if (n == WIFI_SCAN_RUNNING) {
-      /* Timeout after 12s */
-      if (millis() - scanStartMs > 12000) {
+      if (millis() - scanStartMs > 10000) {
         WiFi.scanDelete();
         scanState = SCAN_IDLE;
+        Serial.println("[SCAN] timeout, aborted");
         sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
         return;
       }
@@ -225,14 +221,10 @@ static void handleRequest(WiFiClient &client, const String &method,
       return;
     }
 
-    /* Scan complete - restore AP+STA */
-    const char* apSsid = getApSSID();
     WiFi.scanDelete();
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP(apSsid, "12345678", 1, 0, 2);
-    delay(100);
     scanState = SCAN_IDLE;
 
+    Serial.printf("[SCAN] found %d networks\n", n);
     if (n > 0) {
       String json = "{\"ok\":true,\"done\":true,";
       json += buildScanResultJson(n).substring(1);
