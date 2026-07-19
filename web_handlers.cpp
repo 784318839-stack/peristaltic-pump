@@ -15,6 +15,7 @@
 #include "pump_shared.h"
 #include "pump_state.h"
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <ArduinoJson.h>
 
 // ============================================================================
@@ -67,19 +68,30 @@ static int getContentLength(const String &headers) {
 }
 
 // ============================================================================
-//                            WiFi scan (async, STA-only, coordinated)
+//                            WiFi scan (sync, reliable)
+//
+//  改用同步扫描: ESP32 Arduino 异步扫描在 AP+STA 模式下 _scanStatus
+//  状态机有 bug, scanDelete() 后 scanNetworks() 仍返回 -1。
+//  同步扫描阻塞约 8 秒但可靠, 泵控使用 RMT 硬件脉冲不受影响。
+//  结果缓存 15 秒, 防止前端 300ms 轮询积累的排队请求重复扫描。
 // ============================================================================
 
-static enum { SCAN_IDLE, SCAN_RUNNING } scanState = SCAN_IDLE;
-static unsigned long scanStartMs = 0;
+static bool   scanBusy        = false;
+static bool   scanResultReady = false;
+static String scanResultJson  = "";
+static unsigned long scanResultTime = 0;
+#define SCAN_RESULT_TTL  15000  // cache results for 15 seconds
 
 static String buildScanResultJson(int n) {
+  String ownSSID = WiFi.softAPSSID();  // filter out our own AP
   String json = "{\"networks\":[";
+  bool first = true;
   for (int i = 0; i < n && i < 20; i++) {
-    if (i > 0) json += ",";
-    json += "{\"ssid\":\"";
     String ssid = WiFi.SSID(i);
-    /* 绠€鍗曡浆涔?JSON 涓殑寮曞彿 */
+    if (ssid == ownSSID) continue;  // skip self
+    if (!first) json += ",";
+    first = false;
+    json += "{\"ssid\":\"";
     ssid.replace("\\", "\\\\");
     ssid.replace("\"", "\\\"");
     json += ssid;
@@ -189,49 +201,102 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi async scan (AP+STA mode, no AP drop)
+  // GET /api/scan -> WiFi sync scan (blocking ~8s, reliable)
+  // Cached: subsequent requests within 15s get cached results instantly
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pump.state == RUNNING || pump.state == PAUSED) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
 
-    if (scanState == SCAN_IDLE) {
-      WiFi.scanDelete();
-      int16_t ret = WiFi.scanNetworks(true, false, true, 200);  /* async, passive */
-      Serial.printf("[SCAN] scanNetworks returned: %d\n", ret);
-      scanState = SCAN_RUNNING;
-      scanStartMs = millis();
+    // Expire old cache
+    if (scanResultReady && millis() - scanResultTime > SCAN_RESULT_TTL) {
+      scanResultReady = false;
+    }
+
+    // Return cached results (instant, handles queued polling requests)
+    if (scanResultReady) {
+      sendJson(client, 200, scanResultJson.c_str());
+      return;
+    }
+
+    // Scan already running from another client, tell frontend to wait
+    if (scanBusy) {
       sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
       return;
     }
 
-    int n = WiFi.scanComplete();
-    Serial.printf("[SCAN] scanComplete: %d, elapsed: %lu ms\n", n, millis() - scanStartMs);
+    scanBusy = true;
 
-    if (n == WIFI_SCAN_RUNNING) {
-      if (millis() - scanStartMs > 10000) {
-        WiFi.scanDelete();
-        scanState = SCAN_IDLE;
-        Serial.println("[SCAN] timeout, aborted");
-        sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
-        return;
-      }
-      sendJson(client, 200, "{\"ok\":true,\"done\":false,\"networks\":[]}");
-      return;
+    // 1) Free radio: disconnect STA if it's trying to connect
+    wl_status_t sta = WiFi.status();
+    bool staWasConnecting = false;
+    if (sta != WL_CONNECTED && sta != WL_IDLE_STATUS) {
+      staWasConnecting = true;
+      WiFi.disconnect(true, true);  // turn off STA radio
+      delay(100);
+      Serial.println("[SCAN] STA was connecting, disconnected");
     }
 
+    // 2) Clear stale scan state
     WiFi.scanDelete();
-    scanState = SCAN_IDLE;
+    esp_wifi_clear_ap_list();
+    delay(100);
 
-    Serial.printf("[SCAN] found %d networks\n", n);
+    // 3) Sync active scan
+    int n = WiFi.scanNetworks(false, false, false, 300);
+    Serial.printf("[SCAN] sync scan result: %d (sta=%d)\n", n, sta);
+
+    // 4) STA-only fallback if AP+STA scan failed
+    if (n <= 0) {
+      String apSSID = WiFi.softAPSSID();
+      Serial.println("[SCAN] retrying in STA-only mode...");
+
+      WiFi.mode(WIFI_STA);
+      delay(100);
+      esp_wifi_clear_ap_list();
+      delay(50);
+
+      n = WiFi.scanNetworks(false, false, false, 300);
+      Serial.printf("[SCAN] STA-only sync scan: %d\n", n);
+
+      // Restore AP+STA
+      WiFi.mode(WIFI_AP_STA);
+      delay(100);
+      if (apSSID.length() > 0) {
+        WiFi.softAPdisconnect(true);  // ensure clean state
+        delay(30);
+        WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 2);
+        delay(200);
+        esp_wifi_set_max_tx_power(80);
+        esp_wifi_set_ps(WIFI_PS_NONE);
+      }
+    }
+
+    // 5) Reconnect STA if disconnected earlier
+    if (staWasConnecting) {
+      WiFiConfig cfg;
+      if (loadWiFiConfig(cfg) && cfg.mode == WIFI_MODE_STA_FALLBACK && strlen(cfg.ssid) > 0)
+        WiFi.begin(cfg.ssid, cfg.pass);
+    }
+
+    // 6) Build and cache result
     if (n > 0) {
       String json = "{\"ok\":true,\"done\":true,";
       json += buildScanResultJson(n).substring(1);
-      sendJson(client, 200, json.c_str());
+      scanResultJson = json;
+      scanResultReady = true;
+      scanResultTime = millis();
     } else {
-      sendJson(client, 200, "{\"ok\":true,\"done\":true,\"networks\":[]}");
+      scanResultJson = "{\"ok\":true,\"done\":true,\"networks\":[]}";
+      scanResultReady = true;
+      scanResultTime = millis();
     }
+
+    sendJson(client, 200, scanResultJson.c_str());
+
+    WiFi.scanDelete();
+    scanBusy = false;
     return;
   }
   if (method == "GET" && path.startsWith("/api/info")) {

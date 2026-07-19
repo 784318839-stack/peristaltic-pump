@@ -169,6 +169,7 @@ button:active{transform:scale(.95);opacity:.8}
       <button class="btn-sm btn-active" onclick="showPanel('calib')">校准向导</button>
       <button class="btn-sm" onclick="showPanel('preset')">方案预设</button>
       <button class="btn-sm" onclick="showPanel('wifi')">WiFi 设置</button>
+      <button class="btn-sm" onclick="showPanel('advanced')">高级设置</button>
     </div>
   </div>
 
@@ -181,7 +182,6 @@ button:active{transform:scale(.95);opacity:.8}
       <div class="calib-step" data-step="2">3.运行</div>
       <div class="calib-step" data-step="3">4.读数</div>
       <div class="calib-step" data-step="4">5.保存</div>
-      <div class="calib-step" data-step="5">高级设置</div>
     </div>
     <div class="calib-content" id="calibContent">
       <p style="color:var(--text2);font-size:13px">点击 "开始校准" 启动 5 步校准向导。</p>
@@ -214,6 +214,21 @@ button:active{transform:scale(.95);opacity:.8}
       <button class="btn-sm" onclick="wifiScan()">扫描网络</button>
     </div>
     <div id="wifiScanResult" style="margin-top:8px;font-size:12px"></div>
+  </div>
+
+  <!-- 高级设置面板 -->
+  <div class="card" id="panelAdvanced" style="display:none">
+    <h2>高级设置</h2>
+    <div class="input-row">
+      <label>回吸量</label><input type="number" id="inAntiDrip" value="0.05" step="0.01" min="0" max="5" onchange="sendCmd('set_anti_drip',{value:parseFloat(this.value)})"><span class="unit">mL</span>
+    </div>
+    <div class="input-row">
+      <label>管路寿命</label><input type="number" id="inTubeLife" value="50000" step="100" min="0" max="200000" onchange="sendCmd('set_tube_life',{value:parseFloat(this.value)})"><span class="unit">mL</span>
+    </div>
+    <div style="font-size:12px;color:var(--text2);margin-top:4px">
+      已用: <span id="advTotalDispensed" style="color:var(--accent)">--</span> mL |
+      寿命: <span id="advTubePct" style="color:var(--accent)">--</span>%
+    </div>
   </div>
 
   <!-- 设备信息 -->
@@ -317,7 +332,13 @@ function sendCmd(cmd, params = {}) {
       if (d.id === 'start') toast('▶ 已启动');
       else if (d.id === 'pause') toast('⏸ 已暂停');
       else if (d.id === 'stop') toast('■ 已停止');
-      else if (d.id !== 'get_state') toast('✓ 完成');
+      else if (d.id === 'calib_measure' && d.data) {
+        /* Update calibration result display */
+        var el = $('#calibResult');
+        if (el) el.innerHTML = '旧: ' + (d.data.oldSPM || 0).toFixed(1)
+          + ' → 新: <b style="color:var(--accent)">' + (d.data.newSPM || 0).toFixed(1) + '</b> steps/mL';
+        toast('✓ 计算完成');
+      } else if (d.id !== 'get_state') toast('✓ 完成');
     }
   }).catch(() => {});
 }
@@ -376,6 +397,10 @@ function updateUI(d) {
   safeSetInput('inJetInt', d.jetInterval);
   safeSetInput('inJetFlow', d.jetFlowRate);
   safeSetInput('inJetPres', d.jetPressure);
+  safeSetInput('inAntiDrip', d.antiDripVol?.toFixed(2));
+  safeSetInput('inTubeLife', d.tubeLifeML?.toFixed(0));
+  if ($('#advTotalDispensed')) $('#advTotalDispensed').textContent = (d.totalDispensed || 0).toFixed(0);
+  if ($('#advTubePct')) $('#advTubePct').textContent = d.tubePct || 0;
 
   $('#paramVolume').style.display = (d.mode === 'VOLUME') ? '' : 'none';
   $('#paramTime').style.display = (d.mode === 'TIME') ? '' : 'none';
@@ -469,7 +494,7 @@ function buildLiquidRow(idx) {
 buildLiquidRow(0);
 
 function showPanel(name) {
-  const panels = { calib: 'panelCalib', preset: 'panelPreset', wifi: 'panelWifi' };
+  const panels = { calib: 'panelCalib', preset: 'panelPreset', wifi: 'panelWifi', advanced: 'panelAdvanced' };
   Object.values(panels).forEach(id => { if ($('#' + id)) $('#' + id).style.display = 'none'; });
   const target = panels[name];
   if (target && $('#' + target)) {
@@ -498,6 +523,16 @@ function updateCalibSteps(step) {
   buttons.style.display = '';
   const b1 = $('#calibBtn1'), b2 = $('#calibBtn2');
   b1.style.display = ''; b2.style.display = '';
+
+  /* Calibration fully complete (step >= 5 = CALIB_SETTINGS) */
+  if (step >= 5) {
+    $$('.calib-step').forEach(el => el.classList.add('done'));
+    content.innerHTML = '<p style="color:var(--green);font-size:14px">校准完成！</p>'
+      + '<p style="color:var(--text2);font-size:12px">新 steps/mL 已保存。</p>';
+    b1.textContent = '完成'; b1.onclick = () => sendCmd('calib_settings_done');
+    b2.textContent = '退出'; b2.onclick = () => sendCmd('calib_abort');
+    return;
+  }
 
   switch (step) {
     case 0:
@@ -528,11 +563,6 @@ function updateCalibSteps(step) {
       content.innerHTML = '<p style="color:var(--text2)">第 5/5 步: 确认新校准值</p><p style="color:var(--accent);font-size:14px" id="calibResult">计算中...</p>';
       b1.textContent = '✅ 确认保存'; b1.onclick = () => sendCmd('calib_save');
       b2.textContent = '❌ 放弃'; b2.onclick = () => sendCmd('calib_abort');
-      break;
-    case 5:
-      content.innerHTML = '<p style="color:var(--text2)">高级设置 — 可在泵的键盘上操作</p><p style="color:var(--text3);font-size:12px">回吸量 / 管路寿命 / 液体选择</p>';
-      b1.textContent = '完成'; b1.onclick = () => sendCmd('calib_settings_done');
-      b2.textContent = '退出'; b2.onclick = () => sendCmd('calib_abort');
       break;
   }
 }

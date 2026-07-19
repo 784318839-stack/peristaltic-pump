@@ -45,6 +45,10 @@ static unsigned long staConnectStart = 0;
 static bool staConnecting = false;
 
 void initWiFi() {
+  // 0. 禁用 WiFi NVS 持久化: 防止 ESP-IDF 从 NVS 自动加载旧 AP 配置
+  //    导致 WiFi.mode(WIFI_AP_STA) 时出现两个 AP (旧SSID + 新SSID)
+  WiFi.persistent(false);
+
   // 1. 加载 EEPROM 中的 WiFi 配置
   bool hasConfig = loadWiFiConfig(wifiCfg);
 
@@ -55,13 +59,18 @@ void initWiFi() {
   snprintf(macSuffix, sizeof(macSuffix), "%02X%02X", mac[4], mac[5]);
   apSSID = String(WIFI_AP_SSID_PREFIX) + macSuffix;
 
-  // 3. 直接以 AP+STA 双模启动 (避免后续模式切换)
+  // 3. 断开任何残留 AP (确保只有一个)
+  WiFi.softAPdisconnect(true);
+  delay(50);
+
+  // 4. 直接以 AP+STA 双模启动 (避免后续模式切换)
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
-  // 4. 配置 SoftAP (全功率 20dBm, 热管理已解决)
+  // 5. 配置 SoftAP (全功率 20dBm, 热管理已解决)
   WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);
   WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 2);
+  Serial.printf("[WIFI] AP SSID: %s\n", apSSID.c_str());
   esp_wifi_set_max_tx_power(80);  // 20dBm 全功率
   esp_wifi_set_ps(WIFI_PS_NONE);  // 禁用 WiFi 省电模式, 避免唤醒延迟导致步进电机卡顿
   delay(300);

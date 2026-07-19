@@ -113,7 +113,7 @@ void calibStartRun() {
 }
 
 void calibStopRun() { pump.calibStepsRun = stepper->getCurrentPosition(); stepper->forceStop(); pump.calibRunning = false; pump_machine_transition(STATE_IDLE); }
-void calibFinishRun() { pump.calibStepsRun = stepper->getCurrentPosition(); pump.calibRunning = false; pump_machine_transition(DONE); }
+void calibFinishRun() { pump.calibStepsRun = stepper->getCurrentPosition(); pump.calibRunning = false; pump.calibStep = CALIB_MEASURE; pump_machine_transition(DONE); }
 
 void calibCalculate() {
   if (pump.calibActualVol > 0 && pump.calibStepsRun > 0) {

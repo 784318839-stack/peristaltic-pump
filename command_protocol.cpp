@@ -561,6 +561,7 @@ const char* buildTelemetryJson() {
     "\"progress\":%d,"
     "\"totalDispensed\":%.1f,"
     "\"tubePct\":%d,"
+	    "\"tubeLifeML\":%.0f,"
     "\"jetCount\":%d,"
     "\"jetVolume\":%.1f,"
     "\"jetInterval\":%.0f,"
@@ -583,7 +584,7 @@ const char* buildTelemetryJson() {
     LIQUID_NAMES[ pump.currentLiquid ], pump.currentLiquid,
     pump.flowRate, pump.targetVolume, pump.calibTargetVol, pump.targetTime,
     pump.dispensedVolume, elapsed, progress,
-    pump.totalDispensed, tubePct,
+    pump.totalDispensed, tubePct, pump.tubeLifeML,
     ( pump.mode == MODE_JET ) ? pump.jetCount : 0,
     pump.jetVolume, pump.jetInterval, pump.jetFlowRate, pump.jetPressure,
     pump.stepsPerMl, pump.antiDripVol,
