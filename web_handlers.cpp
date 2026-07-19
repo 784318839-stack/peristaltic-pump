@@ -204,8 +204,6 @@ static void handleRequest(WiFiClient &client, const String &method,
     /* Restore AP+STA */
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(apSsid, "12345678", 1, 0, 2);
-    esp_wifi_set_max_tx_power(80);
-    esp_wifi_set_ps(WIFI_PS_NONE);
     delay(100);
 
     if (n > 0) {
