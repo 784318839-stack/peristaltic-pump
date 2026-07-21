@@ -59,7 +59,7 @@ void processCommandQueue() {
 
 // PSRAM 鍝嶅簲缂撳啿鍖?
 static char* responseBuf = nullptr;
-#define RESPONSE_BUF_SIZE 512
+#define RESPONSE_BUF_SIZE 1536
 
 void initResponseBuffer() {
   responseBuf = (char*)heap_caps_malloc(RESPONSE_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

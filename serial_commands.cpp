@@ -12,7 +12,7 @@
 #include <esp_heap_caps.h>
 
 #define SERIAL_BAUD 115200
-#define SERIAL_BUF_SIZE 512
+#define SERIAL_BUF_SIZE 1024
 
 // PSRAM 优先分配的缓冲区
 static char* serialBuffer = nullptr;
