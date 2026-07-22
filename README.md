@@ -18,7 +18,7 @@
 | **WiFi Web UI** | 手机/PC 浏览器直连，PWA 可添加到桌面 |
 | **BLE UART** | Nordic UART Service，设备名 `PumpCtrl-XXXX` |
 | **USB Serial** | 通过 USB-CDC 串口发送 JSON 命令 (115200bps) |
-| **Hardware UART** | GPIO21=RX, 47=TX, 115200bps — USB-TTL 直连 PC，XToys 集成 |
+| **Hardware UART** | GPIO21=RX, 47=TX, 115200bps — USB-TTL 直连 PC |
 
 四通道共用同一套 **JSON 命令协议**，可同时使用。
 
@@ -124,7 +124,7 @@
 
 ## XToys 集成
 
-蠕动泵可通过硬件 UART 接入 [XToys](https://xtoys.app/) 平台。
+~~蠕动泵可通过硬件 UART 接入 [XToys](https://xtoys.app/) 平台。~~ 已放弃，串口功能保留。
 
 ### 物理连接
 
@@ -137,7 +137,7 @@ PC (USB) → USB-TTL 转接板 → ESP32
 
 ### 状态
 
-⚠️ **XToys 集成暂停开发** (2026-07-21)。串口设备的添加方式需要在 XToys 平台进一步确认。现有脚本文件保留供后续参考：
+⚠️ **XToys 集成已放弃开发** (2026-07-22)。硬件串口功能仍然保留，可通过 USB-TTL 或 USB CDC 使用 JSON 命令协议。现有脚本文件仅供后续参考：
 
 | 文件 | 说明 |
 |------|------|
@@ -261,7 +261,7 @@ Buzzer: 5
 I2C SDA: 21  I2C SCL: 7    (OLED — v2.0 已停用)
 Keypad Rows: 4, 5, 13, 42   (键盘 — v2.0 已停用)
 Keypad Cols: 38, 39, 40, 47
-UART1 RX: 21    TX: 47      (硬件串口 — XToys / PC 直连)
+UART1 RX: 21    TX: 47      (硬件串口, USB-TTL 直连 PC)
 WS2812: 48                   (RGB 状态指示灯)
 ```
 
@@ -298,7 +298,7 @@ peristaltic_pump/
 ├── pump_cli.py               # Python CLI 控制工具
 ├── generate_web_ui.py        # Web UI 构建脚本: index.html → web_ui_gen.h
 ├── build_web_ui.py           # Web UI 备选构建脚本
-├── xtoys_script.js           # XToys 平台集成脚本
+├── xtoys_script.js           # XToys 集成脚本 (已放弃，仅供参考)
 └── README.md
 ```
 
