@@ -176,9 +176,9 @@ const char* parseAndExecute( const char* json ) {
 
   if ( strcmp( cmd, "set_flow" ) == 0 ) {
     float val = params["value"] | NAN;
-    if ( isnan( val ) || val < 0.1 || val > 2000.0 )
-      return errResponse( cmd, "Value out of range ( 0.1 - 2000 )" );
-    pump.flowRate = constrain( val, 0.1f, 9999.0f );
+    if ( isnan( val ) || val < 0.1 || val > 1600.0 )
+      return errResponse( cmd, "Value out of range ( 0.1 - 1600 )" );
+    pump.flowRate = constrain( val, 0.1f, 1600.0f );
     updateStepperSpeed();
     pump.currentMenu = MAIN;
     markDirty();
@@ -234,9 +234,9 @@ const char* parseAndExecute( const char* json ) {
 
   if ( strcmp( cmd, "set_jet_flow" ) == 0 ) {
     float val = params["value"] | NAN;
-    if ( isnan( val ) || val < 10 || val > 2000.0 )
-      return errResponse( cmd, "Value out of range ( 10 - 2000 )" );
-    pump.jetFlowRate = constrain( val, 10.0f, 9999.0f );
+    if ( isnan( val ) || val < 10 || val > 1600.0 )
+      return errResponse( cmd, "Value out of range ( 10 - 1600 )" );
+    pump.jetFlowRate = constrain( val, 10.0f, 1600.0f );
     markDirty();
     beepConfirm();
     return okResponse( cmd );
@@ -390,8 +390,8 @@ const char* parseAndExecute( const char* json ) {
     if ( pump.state != STATE_IDLE ) return errResponse( cmd, "Pump not idle" );
     pump.currentMenu = PRIME;
     ensureStepperOn();
-    stepper->setSpeedInHz( ( uint32_t )flowRateToPPS( 2000.0 ) );
-    stepper->setAcceleration( ( int )flowRateToPPS( 2000.0 ) );
+    stepper->setSpeedInHz( ( uint32_t )flowRateToPPS( 1500.0 ) );
+    stepper->setAcceleration( ( int )flowRateToPPS( 1500.0 ) );
     stepper->setCurrentPosition( 0 );
     stepper->moveTo( 999999999 );  /* 杩滆秴瀹為檯, RMT 纭欢鎸佺画杩愯鐩村埌 forceStop */
     pump.dispensedVolume = 0;
@@ -428,11 +428,12 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "preset_save" ) == 0 ) {
     int slot = params["slot"] | -1;
     if ( slot < 0 || slot > 3 ) return errResponse( cmd, "Invalid slot ( 0-3 )" );
+    bool existed = isPresetValid( slot );
     savePreset( slot );
     pump.presetSlot = slot;
     beepConfirm();
     char data[64];
-    snprintf( data, sizeof( data ), "{\"slot\":%d}", slot );
+    snprintf( data, sizeof( data ), "{\"slot\":%d,\"overwrite\":%s}", slot, existed ? "true" : "false" );
     return okResponse( cmd, data );
   }
 

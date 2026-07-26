@@ -32,7 +32,7 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define HW_UART_TX 47
 #define IDLE_DISABLE_MS   5000
 #define STALL_TIMEOUT_MS  1500
-#define EEPROM_MAGIC  0x5059
+#define EEPROM_MAGIC  0x5061  // v4.2: 400 pulse/rev 细分 (revert from 1600)
 #define EEPROM_ADDR   0
 #define PRESET_BASE   64
 #define PRESET_SIZE   30
