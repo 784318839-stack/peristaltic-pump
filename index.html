@@ -333,12 +333,15 @@ function sendCmd(cmd, params = {}) {
       else if (d.id === 'pause') toast('⏸ 已暂停');
       else if (d.id === 'stop') toast('■ 已停止');
       else if (d.id === 'preset_save' && d.data) {
-        var s = (parseInt(d.data.slot) || 0) + 1;
-        toast(d.data.overwrite ? '✓ 已覆盖方案 ' + s : '✓ 已保存到方案 ' + s);
+        let dt = (typeof d.data === 'string') ? JSON.parse(d.data) : d.data;
+        let sn = (parseInt(dt.slot) || 0) + 1;
+        let ow = dt.overwrite;
+        toast((ow === true || ow === 'true') ? '✓ 已覆盖方案 ' + sn : '✓ 已保存到方案 ' + sn);
       }
       else if (d.id === 'preset_load' && d.data) {
-        var s = (parseInt(d.data.slot) || 0) + 1;
-        toast('📂 已加载方案 ' + s);
+        let dt = (typeof d.data === 'string') ? JSON.parse(d.data) : d.data;
+        let sn = (parseInt(dt.slot) || 0) + 1;
+        toast('📂 已加载方案 ' + sn);
       }
       else if (d.id === 'calib_measure' && d.data) {
         /* Update calibration result display */
@@ -348,7 +351,7 @@ function sendCmd(cmd, params = {}) {
         toast('✓ 计算完成');
       } else if (d.id !== 'get_state') toast('✓ 完成');
     }
-  }).catch(() => {});
+  }).catch(function(e) { toast('请求失败', true); });
 }
 
 function handlePauseResume() {

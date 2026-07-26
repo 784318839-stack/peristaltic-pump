@@ -109,7 +109,9 @@ void loadPreset(int slot) {
 
   if (isV2) {
     /* v2: compressed fields + stepsPerMl */
-    pump.jetVolume   = EEPROM.read(base + 14) / 10.0f;       // uint16→float
+    uint16_t jv;
+    EEPROM.get(base + 14, jv);
+    pump.jetVolume   = jv / 10.0f;                               // uint16→float
     EEPROM.get(base + 16, pump.jetInterval);
     EEPROM.get(base + 20, pump.jetFlowRate);
     pump.jetPressure = EEPROM.read(base + 24);                // uint8
