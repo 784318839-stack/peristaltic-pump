@@ -140,12 +140,6 @@ def main():
     sub.add_parser("prime_stop", help="停止预灌")
     sub.add_parser("monitor", help="持续监控遥测数据")
 
-    # 预设
-    p_load = sub.add_parser("preset_load", help="加载方案预设")
-    p_load.add_argument("slot", type=int, choices=[0, 1, 2, 3])
-    p_save = sub.add_parser("preset_save", help="保存方案预设")
-    p_save.add_argument("slot", type=int, choices=[0, 1, 2, 3])
-
     # 高级设置
     p_ad = sub.add_parser("set_anti_drip", help="设置回吸量 mL (0=关闭)")
     p_ad.add_argument("value", type=float)
@@ -246,10 +240,6 @@ def main():
         elif args.action == "set_liquid":
             resp = send_command(ser, "set_liquid", {"index": args.index})
             print("[OK] 已切换液体" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
-
-        elif args.action in ("preset_load", "preset_save"):
-            resp = send_command(ser, args.action, {"slot": args.slot})
-            print(f"[OK] 方案{args.slot+1}" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
         elif args.action == "calib_select_liquid":
             resp = send_command(ser, "calib_select_liquid", {"index": args.index})

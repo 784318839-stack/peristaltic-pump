@@ -140,12 +140,6 @@ def main():
     sub.add_parser("prime_stop", help="停止预灌")
     sub.add_parser("monitor", help="持续监控遥测数据")
 
-    # 预设
-    p_load = sub.add_parser("preset_load", help="加载方案预设")
-    p_load.add_argument("slot", type=int, choices=[0, 1, 2, 3])
-    p_save = sub.add_parser("preset_save", help="保存方案预设")
-    p_save.add_argument("slot", type=int, choices=[0, 1, 2, 3])
-
     # 高级设置
     p_ad = sub.add_parser("set_anti_drip", help="设置回吸量 mL (0=关闭)")
     p_ad.add_argument("value", type=float)
@@ -193,8 +187,11 @@ def main():
     print(f"连接到 {port}...")
 
     try:
-        ser = serial.Serial(port, BAUD, timeout=0.1)
-        time.sleep(0.5)  # 等待 ESP32 复位完成
+        ser = serial.Serial(port, BAUD, timeout=0.5)
+        ser.dtr = False
+        ser.rts = False
+        ser.reset_input_buffer()
+        time.sleep(5.0)  # ESP32-S3 完整启动 ~5s (setup delay 2000 + PSRAM + EEPROM + BLE + WiFi)
 
         # 读取 hello 消息
         hello = ser.readline()
@@ -231,34 +228,30 @@ def main():
 
         elif args.action == "set_mode":
             resp = send_command(ser, "set_mode", {"mode": args.mode})
-            print("✅ 已切换" if resp.get("ok") else f"❌ {resp.get('error')}")
+            print("[OK] 已切换" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
         elif args.action in ("set_flow", "set_volume", "set_time",
                              "set_jet_vol", "set_jet_interval", "set_jet_flow",
                              "set_jet_pressure", "set_anti_drip", "set_tube_life"):
             val = args.value
             resp = send_command(ser, args.action, {"value": val})
-            print(f"✅ 已设置 {args.action}={val}" if resp.get("ok") else f"❌ {resp.get('error')}")
+            print(f"[OK] 已设置 {args.action}={val}" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
         elif args.action == "set_liquid":
             resp = send_command(ser, "set_liquid", {"index": args.index})
-            print("✅ 已切换液体" if resp.get("ok") else f"❌ {resp.get('error')}")
-
-        elif args.action in ("preset_load", "preset_save"):
-            resp = send_command(ser, args.action, {"slot": args.slot})
-            print(f"✅ 方案{args.slot+1}" if resp.get("ok") else f"❌ {resp.get('error')}")
+            print("[OK] 已切换液体" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
         elif args.action == "calib_select_liquid":
             resp = send_command(ser, "calib_select_liquid", {"index": args.index})
-            print("✅ 已选液体" if resp.get("ok") else f"❌ {resp.get('error')}")
+            print("[OK] 已选液体" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
         elif args.action in ("calib_set_vol", "calib_measure"):
             resp = send_command(ser, args.action, {"value": args.value})
-            print(f"✅ {args.action}={args.value}" if resp.get("ok") else f"❌ {resp.get('error')}")
+            print(f"[OK] {args.action}={args.value}" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
         else:
             resp = send_command(ser, args.action)
-            print("✅ 完成" if resp.get("ok") else f"❌ {resp.get('error')}")
+            print("[OK] 完成" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
         ser.close()
 

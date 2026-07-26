@@ -408,34 +408,6 @@ const char* parseAndExecute( const char* json ) {
     return okResponse( cmd );
   }
 
-  // ===================================================================
-  //  鏂规棰勮
-  // ===================================================================
-
-  if ( strcmp( cmd, "preset_load" ) == 0 ) {
-    int slot = params["slot"] | -1;
-    if ( slot < 0 || slot > 3 ) return errResponse( cmd, "Invalid slot ( 0-3 )" );
-    if ( !isPresetValid( slot ) ) return errResponse( cmd, "Preset slot empty" );
-    loadPreset( slot );
-    pump.presetSlot = slot;
-    pump.currentMenu = MAIN;
-    beepConfirm();
-    char data[64];
-    snprintf( data, sizeof( data ), "{\"slot\":%d}", slot );
-    return okResponse( cmd, data );
-  }
-
-  if ( strcmp( cmd, "preset_save" ) == 0 ) {
-    int slot = params["slot"] | -1;
-    if ( slot < 0 || slot > 3 ) return errResponse( cmd, "Invalid slot ( 0-3 )" );
-    bool existed = isPresetValid( slot );
-    savePreset( slot );
-    pump.presetSlot = slot;
-    beepConfirm();
-    char data[64];
-    snprintf( data, sizeof( data ), "{\"slot\":%d,\"overwrite\":%s}", slot, existed ? "true" : "false" );
-    return okResponse( cmd, data );
-  }
 
   // ===================================================================
   //  鑿滃崟 & 鏌ヨ
@@ -519,7 +491,6 @@ const char* buildTelemetryJson() {
     case SET_JET_PRESSURE: menuStr = "SET_JET_PRESSURE"; break;
     case SELECT_LIQUID:    menuStr = "SELECT_LIQUID";    break;
     case JET_OPTIONS:      menuStr = "JET_OPTIONS";      break;
-    case PRESET_LOAD:      menuStr = "PRESET_LOAD";      break;
     default: break;
   }
 

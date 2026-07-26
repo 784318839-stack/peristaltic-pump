@@ -167,7 +167,6 @@ button:active{transform:scale(.95);opacity:.8}
       <button class="btn-sm" onclick="sendCmd('prime_start')">预灌/快排</button>
       <button class="btn-sm" onclick="sendCmd('prime_stop')">停止预灌</button>
       <button class="btn-sm btn-active" onclick="showPanel('calib')">校准向导</button>
-      <button class="btn-sm" onclick="showPanel('preset')">方案预设</button>
       <button class="btn-sm" onclick="showPanel('wifi')">WiFi 设置</button>
       <button class="btn-sm" onclick="showPanel('advanced')">高级设置</button>
     </div>
@@ -191,12 +190,6 @@ button:active{transform:scale(.95);opacity:.8}
       <button class="btn-action" id="calibBtn1" onclick="calibAction(1)">--</button>
       <button class="btn-action" id="calibBtn2" onclick="calibAction(2)">--</button>
     </div>
-  </div>
-
-  <!-- 方案预设面板 -->
-  <div class="card" id="panelPreset" style="display:none">
-    <h2>方案预设</h2>
-    <div class="btn-row" id="presetSlots"></div>
   </div>
 
   <!-- WiFi 设置面板 -->
@@ -332,17 +325,6 @@ function sendCmd(cmd, params = {}) {
       if (d.id === 'start') toast('▶ 已启动');
       else if (d.id === 'pause') toast('⏸ 已暂停');
       else if (d.id === 'stop') toast('■ 已停止');
-      else if (d.id === 'preset_save' && d.data) {
-        let dt = (typeof d.data === 'string') ? JSON.parse(d.data) : d.data;
-        let sn = (parseInt(dt.slot) || 0) + 1;
-        let ow = dt.overwrite;
-        toast((ow === true || ow === 'true') ? '✓ 已覆盖方案 ' + sn : '✓ 已保存到方案 ' + sn);
-      }
-      else if (d.id === 'preset_load' && d.data) {
-        let dt = (typeof d.data === 'string') ? JSON.parse(d.data) : d.data;
-        let sn = (parseInt(dt.slot) || 0) + 1;
-        toast('📂 已加载方案 ' + sn);
-      }
       else if (d.id === 'calib_measure' && d.data) {
         /* Update calibration result display */
         var el = $('#calibResult');
@@ -505,7 +487,7 @@ function buildLiquidRow(idx) {
 buildLiquidRow(0);
 
 function showPanel(name) {
-  const panels = { calib: 'panelCalib', preset: 'panelPreset', wifi: 'panelWifi', advanced: 'panelAdvanced' };
+  const panels = { calib: 'panelCalib', wifi: 'panelWifi', advanced: 'panelAdvanced' };
   Object.values(panels).forEach(id => { if ($('#' + id)) $('#' + id).style.display = 'none'; });
   const target = panels[name];
   if (target && $('#' + target)) {
@@ -577,29 +559,6 @@ function updateCalibSteps(step) {
       break;
   }
 }
-
-function buildPresetSlots() {
-  const row = $('#presetSlots');
-  row.innerHTML = '';
-  for (let i = 0; i < 4; i++) {
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:flex;gap:4px;width:100%';
-    const btnLoad = document.createElement('button');
-    btnLoad.className = 'btn-action';
-    btnLoad.style.cssText = 'flex:1';
-    btnLoad.textContent = '方案 ' + (i + 1);
-    btnLoad.onclick = () => sendCmd('preset_load', {slot: i});
-    const btnSave = document.createElement('button');
-    btnSave.className = 'btn-sm';
-    btnSave.textContent = '保存';
-    btnSave.onclick = () => sendCmd('preset_save', {slot: i});
-    wrap.appendChild(btnLoad);
-    wrap.appendChild(btnSave);
-    row.appendChild(wrap);
-  }
-  row.innerHTML += '<span style="font-size:11px;color:var(--text3);width:100%;text-align:center;margin-top:4px">点击方案名加载 | 点击保存存入当前设置</span>';
-}
-buildPresetSlots();
 
 function togglePass() {
   var el = $('#wifiPass');

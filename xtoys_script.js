@@ -76,11 +76,6 @@
         { id:"btnStop",   type:"button", name:"■ 停止",    action:"stop" },
         { id:"btnPrime",  type:"button", name:"预灌/快排", action:"prime" },
 
-        // ---- 方案预设 ----
-        { id:"btnLoad1", type:"button", name:"加载方案1", action:"presetLoad1" },
-        { id:"btnLoad2", type:"button", name:"加载方案2", action:"presetLoad2" },
-        { id:"btnSave1", type:"button", name:"存入方案1", action:"presetSave1" },
-
         // ---- 校准 ----
         { id:"btnCalib", type:"button", name:"校准向导", action:"calibEnter" },
 
@@ -240,8 +235,5 @@
             else           { this._send(b.pump,"prime_start"); v.priming = true;  v.statusText = "预灌中..."; }
         }},
         { action:"calibEnter",  on:"action", handler:function(b,v){this._send(b.pump,"calib_enter")} },
-        { action:"presetLoad1", on:"action", handler:function(b,v){this._send(b.pump,"preset_load",{slot:0})} },
-        { action:"presetLoad2", on:"action", handler:function(b,v){this._send(b.pump,"preset_load",{slot:1})} },
-        { action:"presetSave1", on:"action", handler:function(b,v){this._send(b.pump,"preset_save",{slot:0})} }
     ]
 })

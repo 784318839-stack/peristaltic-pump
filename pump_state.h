@@ -40,7 +40,6 @@ struct PumpState {
   long          stallLastPosition   = 0;
   unsigned long stallCheckTime      = 0;
   bool eepromDirty = false;
-  int  presetSlot  = 0;
   long          pausedRemainingSteps = 0;
   unsigned long pausedElapsedSec     = 0;
   PumpState() { for (int i = 0; i < NUM_LIQUIDS; i++) liquidSPM[i] = 250.0; }

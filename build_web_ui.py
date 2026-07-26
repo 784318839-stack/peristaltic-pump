@@ -142,21 +142,6 @@ button:active{transform:scale(.95);opacity:.8}
   <!-- 页面3: 工具 -->
   <div class="page" id="pageTools">
     <div class="card">
-      <h2>方案预设</h2>
-      <div class="btn-row">
-        <button class="btn-sm" onclick="send('preset_load',0)">加载1</button>
-        <button class="btn-sm" onclick="send('preset_load',1)">加载2</button>
-        <button class="btn-sm" onclick="send('preset_load',2)">加载3</button>
-        <button class="btn-sm" onclick="send('preset_load',3)">加载4</button>
-      </div>
-      <div class="btn-row" style="margin-top:4px">
-        <button class="btn-sm" onclick="send('preset_save',0)">存入1</button>
-        <button class="btn-sm" onclick="send('preset_save',1)">存入2</button>
-        <button class="btn-sm" onclick="send('preset_save',2)">存入3</button>
-        <button class="btn-sm" onclick="send('preset_save',3)">存入4</button>
-      </div>
-    </div>
-    <div class="card">
       <h2>快捷操作</h2>
       <div class="btn-row">
         <button class="btn-sm" onclick="send('prime_start')">预灌</button>
