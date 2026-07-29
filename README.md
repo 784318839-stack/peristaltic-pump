@@ -1,7 +1,11 @@
-# ✅ 蠕动泵控制器 — YZ1515 精密点液/喷射工作站
+# ✅ 蠕动泵控制器 — YZ1515 精密点液/喷射工作站  `TMC2226`
 
-基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。
+> ⚠️ **TMC2226 驱动版本** · DM542 原始版本见 `master` 分支
 
+基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。步进驱动采用 **TMC2226 独立芯片** (GPIO15 单线 UART 配置 + GPIO16/17/18 STEP/DIR 直连)。
+
+> **v2.4.0** (2026-07-30) — TMC2226 驱动迁移，CoolStep 自动电流，单线 UART 配置，16 细分。
+> **v2.3.7** (2026-07-29) — GPIO15 纯软件模拟单线半双工 UART (9600 bps)。
 > **v2.3.6** (2026-07-21) — UART 响应缓冲区扩大，CLI DTR 修复，串口超时优化。
 > **v2.3.5** (2026-07-19) — 软件打磨完成，WiFi 扫描重写，高级设置独立，校准流程修复，电机丢步已解决。
 > **v2.3.4** (2026-07-18) — WiFi 全功率恢复 20dBm，6N137 光耦隔离，Web UI 修复。
@@ -69,7 +73,11 @@
 |---|---|
 | 主控 | ESP32-S3-WROOM-1-**N16R8** (16MB Flash + **8MB Octal PSRAM**) |
 | 泵头 | YZ1515 (工业级, 100×80×80mm) |
-| 电机 | 42/57 步进电机 + 驱动器 |
+| 电机 | 57 步进电机 (1.5Ω/相) |
+| 驱动器 | **TMC2226** 独立芯片 (3.3V GPIO 直连, 无需光耦) |
+| 微步 | **16 细分** (3200 pulse/rev), UART 寄存器可调 |
+| 电流控制 | **CoolStep 自动调流** (StallGuard 负载检测, 轻载降流/重载升流) |
+| 静音 | **StealthChop** 静音 PWM 模式 |
 | 蜂鸣器 | 无源蜂鸣器 GPIO5 |
 | WS2812 LED | 状态指示灯 (待机绿/运行蓝/暂停琥珀/完成绿闪) |
 | 显示屏 | SH1106 OLED 128×64 I2C *(v2.0 已停用)* |
@@ -253,26 +261,50 @@ Mode:   MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 
 ---
 
-## 关键引脚
+## 关键引脚 (TMC2226)
 
 ```
-STEP: 16    DIR: 17    ENA: 18
+STEP: 16    DIR: 17    ENN: 18 (低有效, LOW=使能)
+SW UART: 15                   (TMC2226 PDN_UART 单线, 9600bps)
 Buzzer: 5
-I2C SDA: 21  I2C SCL: 7    (OLED — v2.0 已停用)
-Keypad Rows: 4, 5, 13, 42   (键盘 — v2.0 已停用)
-Keypad Cols: 38, 39, 40, 47
 UART1 RX: 21    TX: 47      (硬件串口, USB-TTL 直连 PC)
 WS2812: 48                   (RGB 状态指示灯)
 ```
 
+### TMC2226 接线 (3.3V 直连)
+```
+ESP32                  TMC2226
+─────────────────────────────────
+GPIO16 ─────────────── STEP
+GPIO17 ─────────────── DIR
+GPIO18 ─────────────── ENN
+GPIO15 ─────────────── PDN_UART (单线 UART 配置 + 10k 上拉)
+
+3.3V ───────────────── VCC_IO
+24V ────────────────── VM (电机电源)
+GND ────────────────── GND
+
+MS1 → GND, MS2 → GND   (UART 地址 0)
+OA1/2 → 电机 A 相, OB1/2 → 电机 B 相
+CSA/CSB → 0.11Ω 2512 检流电阻 → GND
+```
+
+### TMC2226 UART 配置 (via GPIO15)
+| 寄存器 | 关键参数 | 值 |
+|--------|----------|-----|
+| CHOPCONF | MRES=4 | 16 微步 (3200 pulse/rev) |
+| IHOLD_IRUN | IRUN=24/31 | 电流上限 ~1.5A RMS |
+| COOLCONF | SEIMIN=1, SEUP=1 | CoolStep 自动调流 |
+| PWMCONF | PWM_AUTOSCALE=1 | StealthChop 静音 |
+| SGTHRS | 10 | StallGuard 负载检测阈值 |
+
 ### 安全引脚 (已验证)
 
-- ✅ STEP/DIR/ENA: GPIO 16/17/18
+- ✅ STEP/DIR/ENN: GPIO 16/17/18
+- ✅ PDN_UART: GPIO 15 (TMC2226 单线 UART)
 - ✅ Buzzer: GPIO 5
-- ✅ I2C: GPIO 21(SDA)/7(SCL)
 - ❌ 避开 Strapping: GPIO 0/3/45/46
 - ❌ 避开 PSRAM 占用: GPIO 27/32/33/34/35/36/37
-- ❌ 避开 JTAG: GPIO 14/15
 
 ---
 
@@ -293,6 +325,8 @@ peristaltic_pump/
 ├── web_ui_gen.h              # Web UI 生成文件 (由 generate_web_ui.py 自动生成)
 ├── command_protocol.h/cpp    # JSON 命令协议 (解析/路由/遥测)
 ├── serial_commands.h/cpp     # USB 串口 + 硬件 UART 命令入口
+├── sw_uart.h/cpp             # GPIO15 单线软件模拟 UART (9600bps 半双工)
+├── tmc2226.h/cpp             # TMC2226 UART 协议驱动 (CRC-8, CoolStep, StealthChop)
 ├── buzzer.h/cpp              # 非阻塞蜂鸣器驱动
 ├── led.h/cpp                 # WS2812 状态指示灯
 ├── pump_cli.py               # Python CLI 控制工具
@@ -317,6 +351,23 @@ peristaltic_pump/
 ---
 
 ## 更新日志
+
+### v2.4.0 (2026-07-30) — TMC2226 驱动迁移
+
+**驱动替换 DM542 → TMC2226:**
+- TMC2226 独立芯片, 3.3V GPIO 直连, 不再需要 6N137 光耦和 74HCT125
+- GPIO15 纯软件模拟单线 UART (9600bps, 中断检测 + 轮询采样)
+- TMC2226 UART 协议驱动: CRC-8 校验, 读写寄存器
+- CoolStep 自动电流: StallGuard 实时检测负载, 轻载降流/重载升流
+- StealthChop 静音 PWM 模式, 低速静音/高速自动切 SpreadCycle
+- 微步 400→3200 pulse/rev (16 细分), stepsPerMl 250→2000
+- ENA 极性翻转: HIGH=使能 → LOW=使能 (TMC2226 ENN 低有效)
+- EEPROM_MAGIC 0x5061→0x5062 (强制作废旧校准数据)
+
+### v2.3.7 (2026-07-29) — GPIO15 软件模拟 UART
+- GPIO15 新增纯软件模拟半双工 UART, 9600 bps 8N1
+- 单引脚复用 TX/RX, PSRAM 优先分配环形缓冲区
+- 零项目依赖, 中断 ISR 仅 3 条指令
 
 ### v2.3.6 (2026-07-21) — UART 串口通信修复
 
@@ -420,20 +471,25 @@ peristaltic_pump/
 
 ## 项目状态
 
-✅ **软件开发完成** (v2.3.6, 2026-07-21)
+✅ **v2.4.0 开发完成** (2026-07-30, TMC2226 驱动)
+
+| 版本 | 分支 | 驱动 |
+|------|------|------|
+| v2.4.0 | `tmc2226` | TMC2226 + CoolStep + StealthChop |
+| v2.3.8 | `master` | DM542 + 6N137 光耦 (原始版本) |
 
 所有已知问题已解决：
 
 | 问题 | 状态 |
 |------|------|
+| TMC2226 CoolStep 自动调流 | ✅ 已启用 |
+| StealthChop 静音驱动 | ✅ 已启用 |
+| GPIO15 单线 UART 通信 | ✅ 9600bps 软件模拟 |
+| DM542→TMC2226 ENA 极性翻转 | ✅ LOW=使能 |
+| 16 细分 stepsPerMl 校准 | ✅ 需重新校准 |
 | UART `get_state` 响应截断 (512B 缓冲区不足) | ✅ `RESPONSE_BUF_SIZE` → 1536 |
 | CLI DTR 复位导致无响应 | ✅ `DTR=False` + 5s 等待 |
-| CLI GBK 编码报错 | ✅ Emoji → 纯文本 |
-| WiFi 扫描扫不到网络 | ✅ 异步改同步扫描, 绕过 ESP32 Arduino bug |
-| 电脑扫描看到两个 AP | ✅ `WiFi.persistent(false)` 防 NVS 自动加载旧配置 |
-| 校准运行完成卡步骤 | ✅ `calibFinishRun()` 补充步进 |
-| 校准结果显示「计算中」 | ✅ 前端 `sendCmd` 接收 SPM 更新 UI |
-| 高级设置耦合校准流程 | ✅ 独立面板 |
+| WiFi 扫描扫不到网络 | ✅ 异步改同步扫描 |
 | 步进电机高速丢步 | ✅ 已解决 |
 
 ---
