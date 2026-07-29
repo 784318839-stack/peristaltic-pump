@@ -30,9 +30,10 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define BUZZER_PIN 5
 #define HW_UART_RX 21
 #define HW_UART_TX 47
+#define SW_UART_PIN 15   // 软件模拟单线半双工 UART (9600bps, 自定义协议)
 #define IDLE_DISABLE_MS   5000
 #define STALL_TIMEOUT_MS  1500
-#define EEPROM_MAGIC  0x5061  // v4.2: 400 pulse/rev 细分 (revert from 1600)
+#define EEPROM_MAGIC  0x5062  // v4.3: TMC2226 16 细分 (3200 pulse/rev)
 #define EEPROM_ADDR   0
 #define ACCEL_FACTOR  0.3f
 #define COMPLETIONS_PER_SAVE 10

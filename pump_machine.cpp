@@ -93,7 +93,7 @@ static void tick_running() {
 
   int32_t curPos = stepper->getCurrentPosition();
   if (curPos != pump.stallLastPosition) { pump.stallLastPosition = curPos; pump.stallCheckTime = millis(); }
-  else if (millis() - pump.stallCheckTime > STALL_TIMEOUT_MS) { stepper->forceStop(); pump.stepperEnabled = false; pump_machine_transition(STALL_ERROR); }
+  else if (millis() - pump.stallCheckTime > STALL_TIMEOUT_MS) { stepper->forceStop(); pump.stepperEnabled = false; digitalWrite(ENA_PIN, HIGH); pump_machine_transition(STALL_ERROR); }
 }
 
 static void tick_anti_drip() {

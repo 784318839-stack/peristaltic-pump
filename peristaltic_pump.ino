@@ -12,6 +12,8 @@
 #include "wifi_manager.h"
 #include "web_handlers.h"
 #include "bluetooth_manager.h"
+#include "sw_uart.h"
+#include "tmc2226.h"
 
 #include "pump_state.h"
 #include "pump_shared.h"
@@ -55,8 +57,8 @@ void setup() {
   stepper = stepperEngine.stepperConnectToPin(STEP_PIN);
   if (stepper) {
     stepper->setDirectionPin(DIR_PIN);
-    // ENA 始终使能: DM542 不支持运行时切使能, SW4 半流待机已够降温
-    digitalWrite(ENA_PIN, HIGH);
+    // TMC2226 ENN 低有效: LOW=使能
+    digitalWrite(ENA_PIN, LOW);
     pump.stepperEnabled = true;
   }
   pump.lastStepperActivity = millis();
@@ -65,6 +67,8 @@ void setup() {
 
   initSerialCommands(); Serial.println("[SETUP] serial ok");
   initHardwareUart(); Serial.println("[SETUP] hw uart ok");
+  swuart_init(SW_UART_PIN, 9600); Serial.println("[SETUP] sw uart ok");
+  tmc2226_init(); Serial.println("[SETUP] tmc2226 ok");
   initBluetooth(); Serial.println("[SETUP] ble ok");
   initWiFi(); initWebServer(); Serial.println("[SETUP] wifi ok");
   led_init(); Serial.println("[SETUP] led ok");
@@ -75,6 +79,7 @@ void setup() {
 void loop() {
   buzzer_tick();
   led_tick();
+  swuart_tick();
 
   processSerialCommands();
   processHardwareUart();

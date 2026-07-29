@@ -9,7 +9,7 @@ struct PumpState {
   PumpMode  mode          = MODE_VOLUME;
   Menu      currentMenu   = MAIN;
   CalibStep calibStep     = CALIB_IDLE;
-  float stepsPerMl       = 250.0;
+  float stepsPerMl       = 2000.0;  // TMC2226 16 细分 (3200 pulse/rev)
   float flowRate         = 50.0;
   float targetVolume     = 10.0;
   float dispensedVolume  = 0;
@@ -42,7 +42,7 @@ struct PumpState {
   bool eepromDirty = false;
   long          pausedRemainingSteps = 0;
   unsigned long pausedElapsedSec     = 0;
-  PumpState() { for (int i = 0; i < NUM_LIQUIDS; i++) liquidSPM[i] = 250.0; }
+  PumpState() { for (int i = 0; i < NUM_LIQUIDS; i++) liquidSPM[i] = 2000.0; }
 };
 
 extern PumpState pump;

@@ -17,7 +17,7 @@ void updateStepperSpeed() {
 }
 
 void ensureStepperOn() {
-  // ENA 始终 HIGH (DM542 不支持运行时切使能, 半流待机降温)
+  digitalWrite(ENA_PIN, LOW);   // TMC2226 ENN 低有效
   pump.stepperEnabled = true;
   pump.lastStepperActivity = millis();
 }
