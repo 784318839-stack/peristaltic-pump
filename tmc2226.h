@@ -2,7 +2,7 @@
  * tmc2226.h — TMC2226 单线 UART 协议驱动
  *
  * 通过 GPIO15 软件模拟 UART (sw_uart) 与 TMC2226 PDN_UART 通信
- * 协议: Trinamic UART 数据报 (0x55 sync + addr + reg + data + CRC-8)
+ * 协议: Trinamic UART 数据报 (0x05 sync + addr + reg + data + CRC-8)
  * CRC: 多项式 x^8 + x^2 + x + 1 (0x07), 起始值 0x00
  *
  * 默认: 地址 0 (MS1=GND, MS2=GND), 16 细分 (3200 pulse/rev)

@@ -46,8 +46,8 @@ static inline void waitUntil(unsigned long target_us) {
 // 存入接收缓冲区 (ISR/tick 上下文调用)
 static bool bufPush(uint8_t byte) {
   if (g_bufCount >= g_bufSize) return false;   // 满, 丢弃
-  size_t idx = (g_bufHead + g_bufCount) % g_bufSize;
-  g_buf[idx] = byte;
+  g_buf[g_bufHead] = byte;
+  g_bufHead = (g_bufHead + 1) % g_bufSize;     // 推进写指针
   g_bufCount++;
   return true;
 }

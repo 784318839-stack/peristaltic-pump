@@ -68,7 +68,13 @@ void setup() {
   initSerialCommands(); Serial.println("[SETUP] serial ok");
   initHardwareUart(); Serial.println("[SETUP] hw uart ok");
   swuart_init(SW_UART_PIN, 9600); Serial.println("[SETUP] sw uart ok");
-  tmc2226_init(); Serial.println("[SETUP] tmc2226 ok");
+  tmc2226_init();
+  if (tmc2226_test_comm()) {
+    Serial.println("[SETUP] tmc2226 ok");
+  } else {
+    Serial.println("[SETUP] tmc2226 COMM FAIL! (check GPIO15 pullup / wiring)");
+    beepCancel();
+  }
   initBluetooth(); Serial.println("[SETUP] ble ok");
   initWiFi(); initWebServer(); Serial.println("[SETUP] wifi ok");
   led_init(); Serial.println("[SETUP] led ok");

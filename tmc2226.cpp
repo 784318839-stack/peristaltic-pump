@@ -6,13 +6,13 @@
  *   - 发送: swuart_write/write_buffer (软件比特冲击)
  *   - 接收: swuart_read_blocking (中断触发 + 轮询采样)
  *
- * 数据报格式 (Trinamic UART):
- *   写: [0x55] [addr:8] [reg|W:8] [D31..D24] ... [D7..D0] [CRC-8]
- *   读请求: [0x55] [addr:8] [reg|R:8] [CRC-8]
- *   读响应: [0x55] [addr(master):8] [D31..D24] ... [D7..D0] [CRC-8]
+ * 数据报格式 (Trinamic UART, TMC2209/2226 家族):
+ *   写: [0x05] [addr:8] [reg|W:8] [D31..D24] ... [D7..D0] [CRC-8]
+ *   读请求: [0x05] [addr:8] [reg|R:8] [CRC-8]
+ *   读响应: [0x05] [addr:8] [reg回显:8] [D31..D24] ... [D7..D0] [CRC-8]
  *
  * CRC-8 多项式: x^8 + x^2 + x + 1 (0x07), 初始 0x00
- * 覆盖范围: addr 到 data 末字节 (不含 sync, 不含 CRC 自身)
+ * 覆盖范围: 从 sync 到 data 末字节 (不含 CRC 自身)
  ******************************************************************************/
 #include "tmc2226.h"
 #include "sw_uart.h"
@@ -21,23 +21,20 @@
 //                         CRC-8 计算
 // ============================================================================
 static uint8_t crc8(const uint8_t* data, size_t len) {
+  // 标准 Trinamic UART CRC-8: 多项式 x^8+x^2+x+1 (0x07), 初始值 0
+  // MSB-first 移位 + 反射输入 (字节按 LSB 先行处理)
   uint8_t crc = 0;
   while (len--) {
-    uint8_t byte = *data++;
-    for (int i = 0; i < 8; i++) {
-      uint8_t mix = (crc ^ byte) & 0x01;
-      crc >>= 1;
-      if (mix) crc ^= 0x8C;   // 多项式 0x07 的反射形式 (x^8+x^2+x+1)
-      byte >>= 1;
+    uint8_t currentByte = *data++;
+    for (int j = 0; j < 8; j++) {
+      if ((crc >> 7) ^ (currentByte & 0x01))
+        crc = (crc << 1) ^ 0x07;
+      else
+        crc = (crc << 1);
+      currentByte >>= 1;
     }
   }
-  // 反射回正序
-  uint8_t result = 0;
-  for (int i = 0; i < 8; i++) {
-    result = (result << 1) | (crc & 1);
-    crc >>= 1;
-  }
-  return result;
+  return crc;
 }
 
 // ============================================================================
@@ -49,14 +46,14 @@ static uint8_t crc8(const uint8_t* data, size_t len) {
 static void tmc2226_write_raw(uint8_t reg, uint32_t data) {
   uint8_t buf[8];
 
-  buf[0] = 0x55;                   // 同步字节
+  buf[0] = 0x05;                   // 同步字节 (TMC2209/2226 家族)
   buf[1] = TMC_ADDR;               // 从机地址
   buf[2] = reg & 0x7F;             // 寄存器 (bit7=0 = 写)
   buf[3] = (data >> 24) & 0xFF;    // D31..D24
   buf[4] = (data >> 16) & 0xFF;    // D23..D16
   buf[5] = (data >> 8)  & 0xFF;    // D15..D8
   buf[6] =  data        & 0xFF;    // D7..D0
-  buf[7] = crc8(buf + 1, 6);       // CRC over [addr..D0] = 6 bytes
+  buf[7] = crc8(buf, 7);           // CRC over [sync..D0] = 7 bytes
 
   swuart_write_buffer(buf, 8);
 
@@ -65,22 +62,22 @@ static void tmc2226_write_raw(uint8_t reg, uint32_t data) {
 }
 
 static uint32_t tmc2226_read_raw(uint8_t reg) {
-  // 1. 发读请求: [0x55] [addr] [reg|R] [CRC]
+  // 1. 发读请求: [0x05] [addr] [reg|R] [CRC]
   uint8_t req[4];
-  req[0] = 0x55;
+  req[0] = 0x05;                        // 同步字节
   req[1] = TMC_ADDR;
-  req[2] = (reg & 0x7F) | TMC_READ;  // 寄存器地址 + 读标志
-  req[3] = crc8(req + 1, 2);          // CRC over [addr, reg|R]
+  req[2] = (reg & 0x7F) | TMC_READ;     // 寄存器地址 + 读标志
+  req[3] = crc8(req, 3);                // CRC over [sync, addr, reg|R]
 
-  swuart_flush();                      // 清空旧数据
+  swuart_flush();                       // 清空旧数据
   swuart_write_buffer(req, 4);
 
   // 2. 等待从机响应 (TMC2226 在 ~10 bit 时间后开始发送)
-  // 响应长度: 1(sync) + 1(addr) + 4(data) + 1(crc) = 7 bytes
-  // 7 * 10 * 104us = ~7.3ms, 给 12ms 超时
+  // 响应长度: sync + addr + reg回显 + 4(data) + crc = 8 bytes
+  // 8 * 10 * 104us = ~8.3ms, 给 15ms 超时
   delayMicroseconds(200);  // 等 TMC2226 准备好
 
-  uint8_t resp[8];  // 最多 8 字节 (sync + addr + 4 data + crc + padding)
+  uint8_t resp[8];
   int len = 0;
   unsigned long deadline = millis() + 15;
 
@@ -93,24 +90,23 @@ static uint32_t tmc2226_read_raw(uint8_t reg) {
   }
 
   // 3. 解析响应
-  if (len < 7) return 0;  // 超时或短帧
+  if (len < 8) return 0;  // 超时或短帧
 
   // 找 sync 字节位置
   int syncIdx = -1;
-  for (int i = 0; i < len - 6; i++) {
-    if (resp[i] == 0x55) { syncIdx = i; break; }
+  for (int i = 0; i <= len - 8; i++) {
+    if (resp[i] == 0x05) { syncIdx = i; break; }
   }
-  if (syncIdx < 0 || len - syncIdx < 7) return 0;
+  if (syncIdx < 0 || len - syncIdx < 8) return 0;
 
-  // 验证 CRC (覆盖 addr + 4 data = 5 bytes)
-  uint8_t expectedCrc = crc8(resp + syncIdx + 1, 5);
-  if (expectedCrc != resp[syncIdx + 6]) return 0;
+  // 验证 CRC (覆盖 sync..D0 = 7 bytes)
+  if (crc8(resp + syncIdx, 7) != resp[syncIdx + 7]) return 0;
 
-  // 组装 32-bit 数据
-  uint32_t data = ((uint32_t)resp[syncIdx + 2] << 24)
-                | ((uint32_t)resp[syncIdx + 3] << 16)
-                | ((uint32_t)resp[syncIdx + 4] << 8)
-                |  (uint32_t)resp[syncIdx + 5];
+  // 组装 32-bit 数据 (跳过 reg 回显字节)
+  uint32_t data = ((uint32_t)resp[syncIdx + 3] << 24)
+                | ((uint32_t)resp[syncIdx + 4] << 16)
+                | ((uint32_t)resp[syncIdx + 5] << 8)
+                |  (uint32_t)resp[syncIdx + 6];
 
   return data;
 }
