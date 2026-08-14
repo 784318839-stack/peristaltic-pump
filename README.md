@@ -4,6 +4,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。步进驱动采用 **TMC2226 独立芯片** (GPIO15 单线 UART 配置 + GPIO16/17/18 STEP/DIR 直连)。
 
+> **v2.4.1** (2026-08-15) — 移除堵转检测与 BLE，修复 AP 热点名 (PumpCtrl-0000)。
 > **v2.4.0** (2026-07-30) — TMC2226 驱动迁移，CoolStep 自动电流，单线 UART 配置，16 细分。
 > **v2.3.7** (2026-07-29) — GPIO15 纯软件模拟单线半双工 UART (9600 bps)。
 > **v2.3.6** (2026-07-21) — UART 响应缓冲区扩大，CLI DTR 修复，串口超时优化。
@@ -20,11 +21,10 @@
 | 接口 | 说明 |
 |---|---|
 | **WiFi Web UI** | 手机/PC 浏览器直连，PWA 可添加到桌面 |
-| **BLE UART** | Nordic UART Service，设备名 `PumpCtrl-XXXX` |
 | **USB Serial** | 通过 USB-CDC 串口发送 JSON 命令 (115200bps) |
 | **Hardware UART** | GPIO21=RX, 47=TX, 115200bps — USB-TTL 直连 PC |
 
-四通道共用同一套 **JSON 命令协议**，可同时使用。
+三通道共用同一套 **JSON 命令协议**，可同时使用。
 
 ---
 
@@ -39,7 +39,7 @@
   - STA 失败不影响 SoftAP，30s 超时自动放弃
   - 密码 XOR 加密存储 (设备 MAC 密钥)，拆机读 EEPROM 是乱码
 - 配置保存在 EEPROM，掉电不丢失
-- **WiFi 扫描**: 同步扫描 (~8s, 结果缓存 15s), 自动过滤自身 AP, 点击 SSID 自动填入
+- **WiFi 扫描**: 同步扫描 (~1-4s, 结果缓存 15s), 扫描期间不切模式不断连, 自动过滤自身 AP, 点击 SSID 自动填入
 - **密码可见**: 👁 按钮切换明文/密文
 
 ---
@@ -62,7 +62,6 @@
 - 💾 **PSRAM 监控** — 页面底部实时显示 PSRAM 和堆内存使用
 - 🔗 **访问地址** — header 显示当前可访问 URL (IP + mDNS)
 - ✅ **WiFi 状态** — STA 连接成功自动弹出提示
-- 🛡️ **堵转保护** — 步进电机 3 秒位置不变自动停机报警 (STALL_ERROR)
 - 🔐 **密码加密** — WiFi 密码 XOR 加密存储 (设备 MAC 密钥，拆机读 EEPROM 是乱码)
 
 ---
@@ -85,48 +84,45 @@
 
 ---
 
-## 功能清单 (17 项)
+## 功能清单 (15 项)
 
 ### 泵送模式
 
-1. **体积模式** — 设定流量 (0.1–2000 mL/min) + 目标体积 (0.1–99999 mL)，恒速运行自动停止
+1. **体积模式** — 设定流量 (0.1–1600 mL/min) + 目标体积 (0.1–99999 mL)，恒速运行自动停止
 2. **时间模式** — 设定体积 + 时间 (1–86400s)，自动计算流量，定时定量
 3. **喷射模式** — 设定单次量 (0.1–10 mL) + 间隔 (1–60s) + 流量 + 压力 (1–10 级)，循环喷射
    - 双参数控制：流量管远近、压力管爆发力
    - 无回吸、柔和加速可选
-   - 间隔 >15s 自动断电，提前 2s 通电节能
 
 ### 运行控制
 
 4. **暂停/恢复** — 运行中暂停，从断点恢复继续
 5. **防滴回吸** — 完成后反转吸回 (ANTI_DRIP 状态，不可打断)
 6. **预灌/快排** — 全速 1500 mL/min 排空管路
-7. **匀加速** — AccelStepper 缓启动/缓停止，无冲击
+7. **匀加速** — FastAccelStepper 缓启动/缓停止，无冲击
 
 ### 校准 & 液体
 
 8. **校准向导** — 5 步引导（选液体 → 设体积 → 运行 → 读取量筒 → 计算结果并保存）
 9. **4 种液体独立校准** — 水 / 粘稠 / 液体1 / 液体2，每种独立 stepsPerMl
 
-### 存储 & 预设
+### 存储
 
-10. **方案预设存储** — 4 槽位，一键加载/保存整套运行参数
-11. **EEPROM 掉电记忆** — 全部参数 + 4 液体校准 + 4 方案 + WiFi 配置
+10. **EEPROM 掉电记忆** — 全部参数 + 4 液体校准 + WiFi 配置
 
-### 智能保护
+### 管路维护
 
-12. **自动关使能** — 待机/暂停 5s 后步进电机自动断电，节能降热
-13. **管路寿命追踪** — 累计流量统计，达到设定值提醒更换 (0=禁用)
+11. **管路寿命追踪** — 累计流量统计，达到设定值提醒更换 (0=禁用)
 
 ### 反馈
 
-14. **非阻塞蜂鸣器** — 7 种音效（按键/确认/取消/启动/暂停/完成/断电）
-15. **WS2812 状态灯** — 颜色随泵状态变化，管路寿命告警红灯闪烁
-16. **实时遥测** — `/api/status` 返回完整 JSON（状态/模式/参数/进度/WiFi 信息）
+12. **非阻塞蜂鸣器** — 7 种音效（按键/确认/取消/启动/暂停/完成/断电）
+13. **WS2812 状态灯** — 颜色随泵状态变化，管路寿命告警红灯闪烁
+14. **实时遥测** — `/api/status` 返回完整 JSON（状态/模式/参数/进度/WiFi 信息）
 
 ### 高级
 
-17. **多客户端并发** — FreeRTOS 命令队列，WiFi + BLE + USB 三通道同时工作，线程安全
+15. **多通道并发** — WiFi + USB 双通道同时工作，loop 单线程串行化无竞态
 
 ---
 
@@ -156,7 +152,7 @@ PC (USB) → USB-TTL 转接板 → ESP32
 
 ## JSON 命令协议
 
-所有控制接口（WiFi / BLE / USB Serial）共用同一套协议。
+所有控制接口（WiFi / USB Serial）共用同一套协议。
 
 ### HTTP API
 
@@ -179,17 +175,16 @@ PC (USB) → USB-TTL 转接板 → ESP32
 | `stop` / `reset` | — | 停止并复位 |
 | `set_mode` | `mode`: "VOLUME"/"TIME"/"JET" | 切换泵送模式 |
 | `set_liquid` | `index`: 0–3 | 切换液体 |
-| `set_flow` | `value`: 0.1–2000 | 设定流量 (mL/min) |
+| `set_flow` | `value`: 0.1–1600 | 设定流量 (mL/min) |
 | `set_volume` | `value`: 0.1–99999 | 设定目标体积 (mL) |
 | `set_time` | `value`: 1–86400 | 设定目标时间 (s) |
 | `set_jet_vol` | `value`: 0.1–10 | 设定单次喷射量 (mL) |
 | `set_jet_interval` | `value`: 1–60 | 设定喷射间隔 (s) |
-| `set_jet_flow` | `value`: 10–2000 | 设定喷射流量 (mL/min) |
+| `set_jet_flow` | `value`: 10–1600 | 设定喷射流量 (mL/min) |
 | `set_jet_pressure` | `value`: 1–10 | 设定喷射压力等级 |
 | `jet_start` / `jet_stop` | — | 喷射模式启停 |
 | `set_anti_drip` | `value`: 0–5 | 设定回吸量 (mL) |
 | `set_tube_life` | `value`: 0–200000 | 设定管路寿命 (mL) |
-| `preset_load` / `preset_save` | `slot`: 0–3 | 方案预设加载/保存 |
 | `calib_enter` → … → `calib_save` | (5 步流程) | 校准向导 |
 | `prime_start` / `prime_stop` | — | 预灌快排 |
 | `get_state` | — | 获取完整状态遥测 |
@@ -254,7 +249,7 @@ Mode:   MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 | 存储器 | 容量 | 用途 |
 |--------|------|------|
 | Flash | 16 MB | 固件 (1.2MB) + SPIFFS |
-| 内部 SRAM | ~320 KB | WiFi/BLE 协议栈、FreeRTOS 任务栈、关键数据 |
+| 内部 SRAM | ~320 KB | WiFi 协议栈、FreeRTOS 任务栈、关键数据 |
 | **PSRAM** | **8 MB** | 遥测/命令/串口缓冲区、FreeRTOS 队列、大 JSON 解析 |
 
 静态缓冲区（`telemetryBuf`/`responseBuf`/`serialBuffer`/`hwUartBuf`）已全部移到 PSRAM heap，内部 SRAM 从 58.3KB 降至 56.0KB。
@@ -319,7 +314,6 @@ peristaltic_pump/
 ├── pump_core.h/cpp           # 泵控制核心 (启停/暂停/恢复/喷射/校准)
 ├── eeprom_store.h/cpp        # EEPROM 持久化存储
 ├── wifi_manager.h/cpp        # WiFi 管理 (SoftAP/Station + EEPROM)
-├── bluetooth_manager.h/cpp   # BLE UART (NimBLE / Nordic UART Service)
 ├── web_handlers.h/cpp        # HTTP 服务 (路由 / 内嵌页面)
 ├── index.html                # Web UI 源文件 (编辑入口)
 ├── web_ui_gen.h              # Web UI 生成文件 (由 generate_web_ui.py 自动生成)
@@ -344,13 +338,21 @@ peristaltic_pump/
 |---|---|
 | [FastAccelStepper](https://github.com/gin66/FastAccelStepper) | 步进电机驱动 (RMT 硬件加速, 匀加速) |
 | [ArduinoJson](https://arduinojson.org/) (v7) | JSON 解析/序列化 |
-| [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) | BLE UART |
 | [U8g2](https://github.com/olikraus/u8g2) | OLED 图形库 *(v2.0 已停用)* |
 | [Keypad](https://github.com/Chris--A/Keypad) | 矩阵键盘 *(v2.0 已停用)* |
 
 ---
 
 ## 更新日志
+
+### v2.4.1 (2026-08-15) — 移除堵转检测与 BLE，修复热点名
+
+- **移除堵转检测**: 删除 `STALL_ERROR` 状态、`stallLastPosition`/`stallCheckTime` 字段与 `STALL_TIMEOUT_MS`，状态机简化为 IDLE → RUNNING → PAUSED → ANTI_DRIP → DONE
+- **移除 BLE UART**: 删除 `bluetooth_manager.h/cpp` 与 NimBLE-Arduino 依赖，控制接口保留 WiFi Web UI / USB Serial / 硬件 UART 三通道
+- Web UI 同步移除堵转告警分支
+- **修复热点名变成 `PumpCtrl-0000`**: arduino-esp32 核心 3.3.x 的 `WiFi.macAddress()` 在 WiFi 初始化前调用会失败（netif 未创建），读到栈残留导致 MAC 后缀为 0000；改用 `esp_read_mac()` 读 eFuse MAC，并一次性 `esp_wifi_restore()` 清理 NVS 旧配置
+- **修复 WiFi 扫描断连**: 删除扫描失败的 STA-only 回退（`WiFi.mode(WIFI_STA)` 会关闭 AP，把热点上的客户端全部踢下线）；core 3.3.x 扫描实现已重写，始终在 AP+STA 双模下扫描，不再切模式
+- **文档与代码对齐**: 功能清单 17→15 项（移除未实现的方案预设/自动断电条目），流量上限 2000→1600 与实际固件一致，hello 报文版本号更新为 2.4.1
 
 ### v2.4.0 (2026-07-30) — TMC2226 驱动迁移
 
@@ -471,11 +473,12 @@ peristaltic_pump/
 
 ## 项目状态
 
-✅ **v2.4.0 开发完成** (2026-07-30, TMC2226 驱动)
+✅ **v2.4.1** (2026-08-15, 移除堵转检测与 BLE)
 
 | 版本 | 分支 | 驱动 |
 |------|------|------|
-| v2.4.0 | `tmc2226` | TMC2226 + CoolStep + StealthChop |
+| v2.4.1 | `tmc2226` | TMC2226 + CoolStep + StealthChop (无堵转检测/BLE) |
+| v2.4.0 | `tmc2226` | TMC2226 + CoolStep + StealthChop (含堵转检测/BLE) |
 | v2.3.8 | `master` | DM542 + 6N137 光耦 (原始版本) |
 
 所有已知问题已解决：

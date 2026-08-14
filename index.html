@@ -405,16 +405,11 @@ function updateUI(d) {
   const isRunning = d.state === 'RUNNING';
   const isPaused = d.state === 'PAUSED';
   const isDone = d.state === 'DONE';
-  const isStall = d.state === 'STALL_ERROR';
 
   $('#btnStart').disabled = !(isIdle || isDone);
-  $('#btnStop').disabled = !(isRunning || isPaused || isStall);
+  $('#btnStop').disabled = !(isRunning || isPaused);
 
-  if (isStall) {
-    $('#btnPause').disabled = true;
-    $('#btnPause').textContent = '⚠ 堵转';
-    $('#btnPause').className = 'btn-stop';
-  } else if (isPaused) {
+  if (isPaused) {
     $('#btnPause').disabled = false;
     $('#btnPause').textContent = '▶ 继续';
     $('#btnPause').className = 'btn-start';

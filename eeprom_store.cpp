@@ -1,10 +1,10 @@
-﻿// eeprom_store.cpp - EEPROM layout, save/load
+// eeprom_store.cpp - EEPROM layout, save/load
 #include "eeprom_store.h"
 #include "pump_shared.h"
 #include "pump_state.h"
 #include <EEPROM.h>
 
-#define EEPROM_MAGIC  0x5062  // v4.3: TMC2226 16 细分 (3200 pulse/rev)
+#define EEPROM_MAGIC  0x5062  // v2.4.0: TMC2226 16 细分 (3200 pulse/rev)
 #define EEPROM_ADDR   0
 
 void markDirty() { pump.eepromDirty = true; }

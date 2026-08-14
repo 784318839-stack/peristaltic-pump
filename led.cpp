@@ -1,4 +1,4 @@
-﻿// led.cpp - WS2812 status LED on GPIO48
+// led.cpp - WS2812 status LED on GPIO48
 // Color scheme:
 //   IDLE       : dim green breathing
 //   RUNNING    : blue solid
@@ -7,7 +7,6 @@
 //   ANTI_DRIP  : cyan quick pulse
 //   Tube >80%  : red overlay blink (superimposed)
 //   WiFi client: white subtle glow overlay
-//   BLE conn   : cyan micro-glow overlay
 #include "led.h"
 #include "pump_shared.h"
 #include "pump_state.h"
@@ -27,7 +26,6 @@ static PumpMode g_lastMode     = MODE_VOLUME;
 static bool     g_lastEnabled  = true;
 static int      g_lastTubePct  = 0;
 static bool     g_lastWifiCli  = false;
-static bool     g_lastBleConn  = false;
 
 // ----- Helpers -----
 static void setRGB(uint8_t r, uint8_t g, uint8_t b) {
@@ -99,12 +97,6 @@ void led_tick() {
       r = 0; g = 50; b = 50;     // cyan
       dim = 0.3 + 0.5 * (1 + sin(g_phase * 0.3));
       pulse = true;
-      break;
-
-    case STALL_ERROR:
-      // Fast red blink (alarm)
-      r = 120; g = 0; b = 0;
-      dim = (sin(g_phase * 0.3) > 0) ? 1.0 : 0.1;
       break;
   }
 

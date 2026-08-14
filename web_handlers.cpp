@@ -1,4 +1,4 @@
-﻿/******************************************************************************
+/******************************************************************************
  * web_handlers.cpp - HTTP 鏈嶅姟瀹炵幇 (WiFiServer, 鏃?AsyncTCP 渚濊禆)
  *
  * 璺敱:
@@ -68,11 +68,14 @@ static int getContentLength(const String &headers) {
 }
 
 // ============================================================================
-//                            WiFi scan (sync, reliable)
+//                            WiFi scan (sync)
 //
-//  改用同步扫描: ESP32 Arduino 异步扫描在 AP+STA 模式下 _scanStatus
-//  状态机有 bug, scanDelete() 后 scanNetworks() 仍返回 -1。
-//  同步扫描阻塞约 8 秒但可靠, 泵控使用 RMT 硬件脉冲不受影响。
+//  始终在 AP+STA 双模下同步扫描, 绝不切换 WiFi.mode()。
+//  老固件扫描失败时切 WIFI_STA 回退, 会把 AP 接口关掉 → 连接在热点上的
+//  手机/网页客户端全部断连; core 3.3.x 的 scanNetworks() 已重写
+//  (直接 esp_wifi_scan_start + 状态位等待), 老核心异步扫描的状态机
+//  bug 已不存在, 无需该回退。
+//  扫描期间射频短暂离开信道, 由协议栈自动恢复, 不会断开任何连接。
 //  结果缓存 15 秒, 防止前端 300ms 轮询积累的排队请求重复扫描。
 // ============================================================================
 
@@ -201,7 +204,7 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/scan -> WiFi sync scan (blocking ~8s, reliable)
+  // GET /api/scan -> WiFi sync scan (blocking ~1-4s)
   // Cached: subsequent requests within 15s get cached results instantly
   if (method == "GET" && path.startsWith("/api/scan")) {
     if (pump.state == RUNNING || pump.state == PAUSED) {
@@ -228,70 +231,24 @@ static void handleRequest(WiFiClient &client, const String &method,
 
     scanBusy = true;
 
-    // 1) Free radio: disconnect STA if it's trying to connect
-    wl_status_t sta = WiFi.status();
-    bool staWasConnecting = false;
-    if (sta != WL_CONNECTED && sta != WL_IDLE_STATUS) {
-      staWasConnecting = true;
-      WiFi.disconnect(true, true);  // turn off STA radio
-      delay(100);
-      Serial.println("[SCAN] STA was connecting, disconnected");
-    }
-
-    // 2) Clear stale scan state
+    // Clear stale scan state, then sync scan in place (AP+STA mode)
     WiFi.scanDelete();
     esp_wifi_clear_ap_list();
     delay(100);
 
-    // 3) Sync active scan
     int n = WiFi.scanNetworks(false, false, false, 300);
-    Serial.printf("[SCAN] sync scan result: %d (sta=%d)\n", n, sta);
+    Serial.printf("[SCAN] sync scan result: %d\n", n);
 
-    // 4) STA-only fallback if AP+STA scan failed
-    if (n <= 0) {
-      String apSSID = WiFi.softAPSSID();
-      Serial.println("[SCAN] retrying in STA-only mode...");
-
-      WiFi.mode(WIFI_STA);
-      delay(100);
-      esp_wifi_clear_ap_list();
-      delay(50);
-
-      n = WiFi.scanNetworks(false, false, false, 300);
-      Serial.printf("[SCAN] STA-only sync scan: %d\n", n);
-
-      // Restore AP+STA
-      WiFi.mode(WIFI_AP_STA);
-      delay(100);
-      if (apSSID.length() > 0) {
-        WiFi.softAPdisconnect(true);  // ensure clean state
-        delay(30);
-        WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 2);
-        delay(200);
-        esp_wifi_set_max_tx_power(80);
-        esp_wifi_set_ps(WIFI_PS_NONE);
-      }
-    }
-
-    // 5) Reconnect STA if disconnected earlier
-    if (staWasConnecting) {
-      WiFiConfig cfg;
-      if (loadWiFiConfig(cfg) && cfg.mode == WIFI_MODE_STA_FALLBACK && strlen(cfg.ssid) > 0)
-        WiFi.begin(cfg.ssid, cfg.pass);
-    }
-
-    // 6) Build and cache result
+    // Build and cache result (scan failure -> empty list, connections untouched)
     if (n > 0) {
       String json = "{\"ok\":true,\"done\":true,";
       json += buildScanResultJson(n).substring(1);
       scanResultJson = json;
-      scanResultReady = true;
-      scanResultTime = millis();
     } else {
       scanResultJson = "{\"ok\":true,\"done\":true,\"networks\":[]}";
-      scanResultReady = true;
-      scanResultTime = millis();
     }
+    scanResultReady = true;
+    scanResultTime = millis();
 
     sendJson(client, 200, scanResultJson.c_str());
 

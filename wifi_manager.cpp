@@ -52,12 +52,17 @@ void initWiFi() {
   // 1. 加载 EEPROM 中的 WiFi 配置
   bool hasConfig = loadWiFiConfig(wifiCfg);
 
-  // 2. 生成唯一 SoftAP SSID
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
+  // 2. 生成唯一 SoftAP SSID — 必须读 eFuse MAC
+  //    注意: core 3.3.x 的 WiFi.macAddress() 走 esp_netif_get_mac(),
+  //    WiFi 初始化前 netif 未创建会失败且不写缓冲区, 导致读到栈残留
+  //    (全零 → 热点名变成 PumpCtrl-0000)。esp_read_mac 读 eFuse, 随时可用。
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);   // 与老核心 WiFi.macAddress() 相同来源
   char macSuffix[5];
   snprintf(macSuffix, sizeof(macSuffix), "%02X%02X", mac[4], mac[5]);
   apSSID = String(WIFI_AP_SSID_PREFIX) + macSuffix;
+  Serial.printf("[WIFI] MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
   // 3. 断开任何残留 AP (确保只有一个)
   WiFi.softAPdisconnect(true);
@@ -66,6 +71,10 @@ void initWiFi() {
   // 4. 直接以 AP+STA 双模启动 (避免后续模式切换)
   WiFi.mode(WIFI_AP_STA);
   delay(100);
+
+  // 4.5 清掉 NVS 里旧固件(老核心 persistent=true)保存的 WiFi 配置
+  //     storage=RAM 模式下不会重新写回, 一次性清理幽灵 AP 根源
+  esp_wifi_restore();
 
   // 5. 配置 SoftAP (全功率 20dBm, 热管理已解决)
   WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);

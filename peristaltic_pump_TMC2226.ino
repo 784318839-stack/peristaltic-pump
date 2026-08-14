@@ -1,7 +1,7 @@
-﻿/******************************************************************************
+/******************************************************************************
  * Peristaltic Pump Controller v3 — YZ1515 precision dispensing / jet workstation
  * Hardware: ESP32-S3-WROOM-1-N16 (16 MB Flash)
- * v2.3.2: PumpState struct extracted, pump_machine state machine module, cleaner architecture
+ * v2.4.1: 移除堵转检测与 BLE；修复 AP 热点名 (esp_read_mac) 与 WiFi 扫描断连
  ******************************************************************************/
 
 #include <Arduino.h>
@@ -11,7 +11,6 @@
 #include "serial_commands.h"
 #include "wifi_manager.h"
 #include "web_handlers.h"
-#include "bluetooth_manager.h"
 #include "sw_uart.h"
 #include "tmc2226.h"
 
@@ -75,7 +74,6 @@ void setup() {
     Serial.println("[SETUP] tmc2226 COMM FAIL! (check GPIO15 pullup / wiring)");
     beepCancel();
   }
-  initBluetooth(); Serial.println("[SETUP] ble ok");
   initWiFi(); initWebServer(); Serial.println("[SETUP] wifi ok");
   led_init(); Serial.println("[SETUP] led ok");
 
@@ -90,7 +88,6 @@ void loop() {
   processSerialCommands();
   processHardwareUart();
   handleWebClients();
-  handleBluetooth();
   wifiMaintain();
 
   pump_machine_tick();

@@ -1,4 +1,4 @@
-﻿#ifndef PUMP_STATE_H
+#ifndef PUMP_STATE_H
 #define PUMP_STATE_H
 #include <Arduino.h>
 #include "pump_shared.h"
@@ -37,8 +37,6 @@ struct PumpState {
   float calibNewSPM     = 0;
   bool          stepperEnabled      = true;
   unsigned long lastStepperActivity = 0;
-  long          stallLastPosition   = 0;
-  unsigned long stallCheckTime      = 0;
   bool eepromDirty = false;
   long          pausedRemainingSteps = 0;
   unsigned long pausedElapsedSec     = 0;

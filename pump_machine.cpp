@@ -1,4 +1,4 @@
-﻿#include "pump_machine.h"
+#include "pump_machine.h"
 #include "pump_state.h"
 #include "pump_core.h"
 #include "buzzer.h"
@@ -7,7 +7,6 @@
 static void tick_running();
 static void tick_anti_drip();
 static void tick_done();
-static void tick_stall_error();
 
 static void on_entry(State newState) {
   switch (newState) {
@@ -15,7 +14,6 @@ static void on_entry(State newState) {
     case DONE: beepDone(); break;
     case PAUSED: beepPause(); break;
     case STATE_IDLE: pump.dispensedVolume = 0; break;
-    case STALL_ERROR: beepCancel(); beepCancel(); beepCancel(); break;
     default: break;
   }
 }
@@ -32,7 +30,6 @@ void pump_machine_tick() {
     case RUNNING: tick_running(); break;
     case ANTI_DRIP: tick_anti_drip(); break;
     case DONE: tick_done(); break;
-    case STALL_ERROR: tick_stall_error(); break;
     default: break;
   }
 }
@@ -90,10 +87,6 @@ static void tick_running() {
       pump_machine_transition(DONE);
     }
   }
-
-  int32_t curPos = stepper->getCurrentPosition();
-  if (curPos != pump.stallLastPosition) { pump.stallLastPosition = curPos; pump.stallCheckTime = millis(); }
-  else if (millis() - pump.stallCheckTime > STALL_TIMEOUT_MS) { stepper->forceStop(); pump.stepperEnabled = false; digitalWrite(ENA_PIN, HIGH); pump_machine_transition(STALL_ERROR); }
 }
 
 static void tick_anti_drip() {
@@ -107,5 +100,3 @@ static void tick_done() {
   if (pump.prevState != DONE) { done_entry_ms = millis(); pump.prevState = DONE; }
   if (millis() - done_entry_ms > 2000) pump_machine_transition(STATE_IDLE);
 }
-
-static void tick_stall_error() { pump.lastStepperActivity = millis(); }

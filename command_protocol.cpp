@@ -1,8 +1,8 @@
-﻿/******************************************************************************
+/******************************************************************************
  * command_protocol.cpp 鈥?杩滅▼鍛戒护鍗忚瀹炵幇
  *
  * 绾跨▼瀹夊叏璁捐 :
- *   - Web / BLE / 涓插彛鍥炶皟 : 鍙皟鐢?enqueueCommand() 鍏ラ槦
+ *   - Web / 涓插彛鍥炶皟 : 鍙皟鐢?enqueueCommand() 鍏ラ槦
  *   - loop()            : 璋冪敤 processCommandQueue() 鍑洪槦骞舵墽琛?
  *   - 鎵€鏈夌姸鎬佽鍐欓兘鍦?loop() 绾跨▼涓婁覆琛屽寲 , 鏃犻渶浜掓枼閿?
  ******************************************************************************/
@@ -109,7 +109,6 @@ const char* parseAndExecute( const char* json ) {
   // ===================================================================
 
   if ( strcmp( cmd, "start" ) == 0 ) {
-    if ( pump.state == STALL_ERROR ) return errResponse( cmd, "Motor stalled! Reset first" );
     if ( pump.state != STATE_IDLE && pump.state != DONE ) return errResponse( cmd, "Pump not idle" );
     if ( pump.mode == MODE_JET ) startJetCycle();
     else startPump();
@@ -474,7 +473,6 @@ const char* buildTelemetryJson() {
     case PAUSED:      stateStr = "PAUSED";      break;
     case DONE:        stateStr = "DONE";        break;
     case ANTI_DRIP:   stateStr = "ANTI_DRIP";   break;
-    case STALL_ERROR: stateStr = "STALL_ERROR"; break;
     default: break;
   }
 

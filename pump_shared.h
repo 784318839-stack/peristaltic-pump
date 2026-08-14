@@ -1,4 +1,4 @@
-﻿/******************************************************************************
+/******************************************************************************
  * pump_shared.h - Shared types, enums, pin definitions, constants.
  *
  * THIS FILE NO LONGER DECLARES pump-parameter extern globals.
@@ -13,7 +13,7 @@
 //                              Enums
 // ============================================================================
 enum PumpMode { MODE_VOLUME, MODE_TIME, MODE_JET };
-enum State    { STATE_IDLE, RUNNING, PAUSED, DONE, ANTI_DRIP, STALL_ERROR };
+enum State    { STATE_IDLE, RUNNING, PAUSED, DONE, ANTI_DRIP };
 enum Menu     { MAIN, SET_FLOW, SET_VOL, SET_TIME, CALIBRATE, PRIME,
                 SET_JET_VOL, SET_JET_INTERVAL, SET_JET_FLOW, SET_JET_PRESSURE,
                 SELECT_LIQUID, JET_OPTIONS };
@@ -31,8 +31,7 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define HW_UART_RX 21
 #define HW_UART_TX 47
 #define SW_UART_PIN 15   // 软件模拟单线半双工 UART (9600bps, 自定义协议)
-#define STALL_TIMEOUT_MS  1500
-#define EEPROM_MAGIC  0x5062  // v4.3: TMC2226 16 细分 (3200 pulse/rev)
+#define EEPROM_MAGIC  0x5062  // v2.4.0: TMC2226 16 细分 (3200 pulse/rev)
 #define EEPROM_ADDR   0
 #define ACCEL_FACTOR  0.3f
 #define COMPLETIONS_PER_SAVE 10

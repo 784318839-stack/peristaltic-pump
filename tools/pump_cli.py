@@ -191,7 +191,7 @@ def main():
         ser.dtr = False
         ser.rts = False
         ser.reset_input_buffer()
-        time.sleep(5.0)  # ESP32-S3 完整启动 ~5s (setup delay 2000 + PSRAM + EEPROM + BLE + WiFi)
+        time.sleep(5.0)  # ESP32-S3 完整启动 ~5s (setup delay 2000 + PSRAM + EEPROM + WiFi)
 
         # 读取 hello 消息
         hello = ser.readline()
