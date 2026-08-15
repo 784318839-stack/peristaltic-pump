@@ -3,7 +3,7 @@
 #define WEB_UI_GEN_H
 
 // Generated from: index.html
-// Size: 24339 bytes (minified)
+// Size: 24311 bytes (minified)
 
 static const char WEB_UI[] PROGMEM =
   "<!DOCTYPE html> <html lang=\"zh-CN\"> <head> <meta charset=\"UTF-8\"> <meta name=\"viewport\" content=\"width=device-wid"
@@ -201,19 +201,19 @@ static const char WEB_UI[] PROGMEM =
   "ib_abort'); break; } } function togglePass() { var el = $('#wifiPass'); el.type = el.type === 'password' ? 'text' : 'pas"
   "sword'; } function wifiSave() { const ssid = $('#wifiSSID').value.trim(); const pass = $('#wifiPass').value; fetch('/api"
   "/wifi', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ssid, pass, mode: ssid ? "
-  "1 : 0}) }).then(r => r.json()).then(d => { if (d.ok) { toast('WiFi 配置已保存，正重启网络...'); sendCmd('wifi_restart'); } else { t"
-  "oast('保存失败', true); } }); } let wifiScanTimer = null; function wifiScan() { if (wifiScanTimer) clearInterval(wifiScanTim"
-  "er); $('#wifiScanResult').textContent = '扫描中...'; var dots = 0; wifiScanTimer = setInterval(function() { fetch('/api/sca"
-  "n').then(r => r.json()).then(d => { if (d.done) { clearInterval(wifiScanTimer); wifiScanTimer = null; var nets = d.netwo"
-  "rks || []; if (nets.length === 0) { $('#wifiScanResult').textContent = '未发现 WiFi 网络'; return; } $('#wifiScanResult').inn"
-  "erHTML = nets.map(function(n) { return '<div style=\"padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)\""
-  " onclick=\"document.getElementById(\\'wifiSSID\\').value=\\'' + n.ssid.replace(/'/g, \"\\\\'\") + '\\'\">' + n.ssid + (n"
-  ".secure ? ' 🔒' : '') + ' <span style=\"color:var(--text3)\">' + n.rssi + 'dBm</span>' + '</div>'; }).join(''); } else { "
-  "dots = (dots + 1) % 4; $('#wifiScanResult').textContent = '扫描中' + '.'.repeat(dots); } }).catch(function() { clearInterva"
-  "l(wifiScanTimer); wifiScanTimer = null; $('#wifiScanResult').textContent = '扫描失败，请重试'; }); }, 300); } let toastTimer; fu"
-  "nction toast(msg, isError = false) { const el = $('#toast'); el.textContent = msg; el.className = 'toast show' + (isErro"
-  "r ? ' error' : ''); if (toastTimer) clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'),"
-  " 2000); } connectHTTP(); </script> </body> </html>"
+  "1 : 0}) }).then(r => r.json()).then(d => { if (d.ok) { toast('WiFi 配置已保存，网络已重启'); } else { toast('保存失败', true); } }); } "
+  "let wifiScanTimer = null; function wifiScan() { if (wifiScanTimer) clearInterval(wifiScanTimer); $('#wifiScanResult').te"
+  "xtContent = '扫描中...'; var dots = 0; wifiScanTimer = setInterval(function() { fetch('/api/scan').then(r => r.json()).then"
+  "(d => { if (d.done) { clearInterval(wifiScanTimer); wifiScanTimer = null; var nets = d.networks || []; if (nets.length ="
+  "== 0) { $('#wifiScanResult').textContent = '未发现 WiFi 网络'; return; } $('#wifiScanResult').innerHTML = nets.map(function(n"
+  ") { return '<div style=\"padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)\" onclick=\"document.getElem"
+  "entById(\\'wifiSSID\\').value=\\'' + n.ssid.replace(/'/g, \"\\\\'\") + '\\'\">' + n.ssid + (n.secure ? ' 🔒' : '') + ' <s"
+  "pan style=\"color:var(--text3)\">' + n.rssi + 'dBm</span>' + '</div>'; }).join(''); } else { dots = (dots + 1) % 4; $('#"
+  "wifiScanResult').textContent = '扫描中' + '.'.repeat(dots); } }).catch(function() { clearInterval(wifiScanTimer); wifiScanT"
+  "imer = null; $('#wifiScanResult').textContent = '扫描失败，请重试'; }); }, 300); } let toastTimer; function toast(msg, isError ="
+  " false) { const el = $('#toast'); el.textContent = msg; el.className = 'toast show' + (isError ? ' error' : ''); if (toa"
+  "stTimer) clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2000); } connectHTTP(); </"
+  "script> </body> </html>"
   ;
 
 #endif // WEB_UI_GEN_H

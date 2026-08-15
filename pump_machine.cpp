@@ -82,7 +82,7 @@ static void tick_running() {
   } else {
     pump.dispensedVolume = (float)stepper->getCurrentPosition() / pump.stepsPerMl;
     if (pump.mode == MODE_TIME && pump.pumpElapsed >= pump.pumpDuration + 1) {
-      stepper->forceStop(); pump.totalDispensed += pump.targetVolume;
+      stepper->forceStopAndNewPosition(stepper->getCurrentPosition()); pump.totalDispensed += pump.targetVolume;
       pump.completionCount++; if (pump.completionCount >= 10) { markDirty(); pump.completionCount = 0; }
       pump_machine_transition(DONE);
     }

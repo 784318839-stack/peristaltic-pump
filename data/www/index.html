@@ -569,8 +569,7 @@ function wifiSave() {
     body: JSON.stringify({ssid, pass, mode: ssid ? 1 : 0})
   }).then(r => r.json()).then(d => {
     if (d.ok) {
-      toast('WiFi 配置已保存，正重启网络...');
-      sendCmd('wifi_restart');
+      toast('WiFi 配置已保存，网络已重启');
     } else {
       toast('保存失败', true);
     }

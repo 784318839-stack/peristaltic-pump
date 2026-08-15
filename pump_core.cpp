@@ -1,4 +1,4 @@
-﻿// pump_core.cpp - Stepper motor control, pump state machine, calibration
+// pump_core.cpp - Stepper motor control, pump state machine, calibration
 #include "pump_core.h"
 #include "pump_state.h"
 #include "pump_shared.h"
@@ -43,11 +43,20 @@ void startPump() {
   pump_machine_transition(RUNNING);
 }
 
-void stopPump() { stepper->forceStop(); pump_machine_transition(STATE_IDLE); }
+// 立即停止电机并精确保持位置:
+// forceStopAndNewPosition() 丢弃队列中未执行的脉冲 (无 ~20ms 滑行),
+// 并把位置计数器/目标精确设到 pos — 专用于暂停/停止场景。
+static void stopStepperExact() {
+  stepper->forceStopAndNewPosition(stepper->getCurrentPosition());
+}
+
+void stopPump() { stopStepperExact(); pump_machine_transition(STATE_IDLE); }
 
 void pausePump() {
-  stepper->forceStop();
-  pump.pausedRemainingSteps = stepper->targetPos() - stepper->getCurrentPosition();
+  // 先快照原始目标 (forceStopAndNewPosition 会覆写 target), 再立即停止
+  int32_t posAtPause = stepper->getCurrentPosition();
+  pump.pausedRemainingSteps = stepper->targetPos() - posAtPause;
+  stepper->forceStopAndNewPosition(posAtPause);
   if (pump.mode == MODE_TIME) pump.pausedElapsedSec = (millis() - pump.pumpStartMs) / 1000;
   pump_machine_transition(PAUSED);
 }
@@ -64,6 +73,7 @@ void resumePump() {
 void resetPump() {
   pump.dispensedVolume = 0; pump.pumpElapsed = 0;
   pump.pausedRemainingSteps = 0; pump.pausedElapsedSec = 0;
+  pump.currentMenu = MAIN;   // 防止预灌(PRIME)等状态下 stop 后菜单残留导致卡死
   stepper->setCurrentPosition(0);
   pump_machine_transition(STATE_IDLE);
 }
@@ -88,7 +98,7 @@ void startJetCycle() {
   pump_machine_transition(RUNNING);
 }
 
-void stopJetCycle() { stepper->forceStop(); pump.jetSquirting = false; pump_machine_transition(STATE_IDLE); }
+void stopJetCycle() { stopStepperExact(); pump.jetSquirting = false; pump_machine_transition(STATE_IDLE); }
 
 void selectLiquid(int idx) {
   if (idx < 0 || idx >= NUM_LIQUIDS) return;
@@ -112,7 +122,7 @@ void calibStartRun() {
   pump_machine_transition(RUNNING);
 }
 
-void calibStopRun() { pump.calibStepsRun = stepper->getCurrentPosition(); stepper->forceStop(); pump.calibRunning = false; pump_machine_transition(STATE_IDLE); }
+void calibStopRun() { pump.calibStepsRun = stepper->getCurrentPosition(); stopStepperExact(); pump.calibRunning = false; pump_machine_transition(STATE_IDLE); }
 void calibFinishRun() { pump.calibStepsRun = stepper->getCurrentPosition(); pump.calibRunning = false; pump.calibStep = CALIB_MEASURE; pump_machine_transition(DONE); }
 
 void calibCalculate() {

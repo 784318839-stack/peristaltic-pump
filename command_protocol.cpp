@@ -159,6 +159,8 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "set_liquid" ) == 0 ) {
+    if ( pump.state == RUNNING || pump.state == PAUSED )
+      return errResponse( cmd, "Pump busy - stop first" );
     int idx = params["index"] | -1;
     if ( idx < 0 || idx >= NUM_LIQUIDS ) return errResponse( cmd, "Invalid liquid index ( 0-3 )" );
     selectLiquid( idx );
@@ -174,6 +176,8 @@ const char* parseAndExecute( const char* json ) {
   // ===================================================================
 
   if ( strcmp( cmd, "set_flow" ) == 0 ) {
+    if ( pump.state == RUNNING || pump.state == PAUSED )
+      return errResponse( cmd, "Pump busy - stop first" );
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 0.1 || val > 1600.0 )
       return errResponse( cmd, "Value out of range ( 0.1 - 1600 )" );
@@ -186,6 +190,8 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "set_volume" ) == 0 ) {
+    if ( pump.state == RUNNING || pump.state == PAUSED )
+      return errResponse( cmd, "Pump busy - stop first" );
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 0.1 || val > 99999 )
       return errResponse( cmd, "Value out of range ( 0.1 - 99999 )" );
@@ -197,6 +203,8 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "set_time" ) == 0 ) {
+    if ( pump.state == RUNNING || pump.state == PAUSED )
+      return errResponse( cmd, "Pump busy - stop first" );
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 1 || val > 86400 )
       return errResponse( cmd, "Value out of range ( 1 - 86400 )" );
@@ -392,7 +400,7 @@ const char* parseAndExecute( const char* json ) {
     stepper->setSpeedInHz( ( uint32_t )flowRateToPPS( 1500.0 ) );
     stepper->setAcceleration( ( int )flowRateToPPS( 1500.0 ) );
     stepper->setCurrentPosition( 0 );
-    stepper->moveTo( 999999999 );  /* 杩滆秴瀹為檯, RMT 纭欢鎸佺画杩愯鐩村埌 forceStop */
+    stepper->moveTo( 999999999 );  /* 杩滆秴瀹為檯, RMT 纭欢鎸佺画杩愯鐩村埌 forceStopAndNewPosition/stop */
     pump.dispensedVolume = 0;
     pump.state = RUNNING;
     beepStart();

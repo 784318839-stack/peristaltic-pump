@@ -352,6 +352,10 @@ peristaltic_pump/
 - Web UI 同步移除堵转告警分支
 - **修复热点名变成 `PumpCtrl-0000`**: arduino-esp32 核心 3.3.x 的 `WiFi.macAddress()` 在 WiFi 初始化前调用会失败（netif 未创建），读到栈残留导致 MAC 后缀为 0000；改用 `esp_read_mac()` 读 eFuse MAC，并一次性 `esp_wifi_restore()` 清理 NVS 旧配置
 - **修复 WiFi 扫描断连**: 删除扫描失败的 STA-only 回退（`WiFi.mode(WIFI_STA)` 会关闭 AP，把热点上的客户端全部踢下线）；core 3.3.x 扫描实现已重写，始终在 AP+STA 双模下扫描，不再切模式
+- **修复暂停/恢复过冲**: 改用 `forceStopAndNewPosition()` 立即停止并丢弃队列（原 `forceStop()` 排空 ~20ms 已排程脉冲导致恢复时多走行程，最大流量下 ≈0.5 mL）；暂停前先快照原始目标位置，恢复落点精确
+- **修复预灌停止后卡死**: `resetPump()` 统一复位 `currentMenu = MAIN`，通用 `stop` 后不再残留 PRIME 状态
+- **参数保护**: `set_flow`/`set_volume`/`set_time`/`set_liquid` 在 RUNNING/PAUSED 时拒绝执行（防止中途变速和累计流量计错）
+- **修复 WiFi 保存双重重启**: 前端保存配置后不再重复发送 `wifi_restart`（POST `/api/wifi` 已包含重启）
 - **文档与代码对齐**: 功能清单 17→15 项（移除未实现的方案预设/自动断电条目），流量上限 2000→1600 与实际固件一致，hello 报文版本号更新为 2.4.1
 
 ### v2.4.0 (2026-07-30) — TMC2226 驱动迁移
