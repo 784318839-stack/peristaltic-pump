@@ -10,48 +10,11 @@
 #include "pump_shared.h"
 #include "pump_state.h"
 #include "wifi_manager.h"
+#include "tmc2226.h"
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
+#include <ctype.h>
 
-// ============================================================================
-//                            FreeRTOS 鍛戒护闃熷垪
-// ============================================================================
-static QueueHandle_t cmdQueue = nullptr;
-static CommandResponseCallback g_responseCb = nullptr;
-
-void initCommandQueue() {
-  cmdQueue = xQueueCreate( CMD_QUEUE_SIZE, sizeof( CommandMsg ) );
-}
-
-void setCommandResponseCallback( CommandResponseCallback cb ) {
-  g_responseCb = cb;
-}
-
-bool enqueueCommand( const char* json ) {
-  return enqueueCommandClient( json, 0 );  // clientId = 0 琛ㄧず鏃犲鎴风 ( 涓插彛 )
-}
-
-bool enqueueCommandClient( const char* json, uint32_t clientId ) {
-  if ( !cmdQueue ) return false;
-  CommandMsg msg;
-  msg.clientId = clientId;
-  strncpy( msg.json, json, CMD_JSON_MAX - 1 );
-  msg.json[CMD_JSON_MAX - 1] = '\0';
-  BaseType_t ret = xQueueSend( cmdQueue, &msg, 0 );  // 闈為樆濉炲叆闃?
-  return ( ret == pdTRUE );
-}
-
-void processCommandQueue() {
-  if ( !cmdQueue ) return;
-  CommandMsg msg;
-  while ( xQueueReceive( cmdQueue, &msg, 0 ) == pdTRUE ) {
-    const char* response = parseAndExecute( msg.json );
-    // 濡傛灉鏈?HTTP 瀹㈡埛绔叧鑱斾笖娉ㄥ唽浜嗗洖璋?, 灏嗗搷搴斿彂鍥?
-    if ( msg.clientId != 0 && g_responseCb && response ) {
-      g_responseCb( msg.clientId, response );
-    }
-  }
-}
 
 // ============================================================================
 //                            JSON 瑙ｆ瀽 & 鍛戒护璺敱
@@ -440,6 +403,43 @@ const char* parseAndExecute( const char* json ) {
     return okResponse( cmd );
   }
 
+  if ( strcmp( cmd, "selftest" ) == 0 ) {
+    uint32_t ioin = tmc2226_read( TMC_REG_IOIN );
+    bool tmcOk = ( ioin != 0 ) && ( ( ( ioin & 0x10 ) != 0 ) || ( ( ioin & 0x0F0000 ) != 0 ) );
+    uint16_t magic = 0;
+    EEPROM.get( EEPROM_ADDR, magic );
+    char data[320];
+    snprintf( data, sizeof( data ),
+      "{\"fw\":\"%s\",\"tmc2226\":%s,\"ioin\":\"0x%08lX\","
+      "\"eepromMagic\":\"0x%04X\",\"eepromOk\":%s,"
+      "\"psramFree\":%d,\"psramTotal\":%d,\"heapFree\":%d,\"heapTotal\":%d}",
+      FW_VERSION,
+      tmcOk ? "true" : "false", ( unsigned long )ioin,
+      magic, ( magic == EEPROM_MAGIC ) ? "true" : "false",
+      ( int )( ESP.getFreePsram() / 1024 ), ( int )( ESP.getPsramSize() / 1024 ),
+      ( int )( ESP.getFreeHeap() / 1024 ), ( int )( ESP.getHeapSize() / 1024 ) );
+    return okResponse( cmd, data );
+  }
+
+  if ( strcmp( cmd, "set_pin" ) == 0 ) {
+    const char* pin = params["value"] | "";
+    size_t len = strlen( pin );
+    if ( len < 4 || len > PIN_MAX_LEN )
+      return errResponse( cmd, "PIN must be 4-8 digits" );
+    for ( size_t i = 0; i < len; i++ )
+      if ( !isdigit( ( unsigned char )pin[i] ) )
+        return errResponse( cmd, "PIN must be 4-8 digits" );
+    savePin( pin );
+    beepConfirm();
+    return okResponse( cmd, "{\"pinSet\":true}" );
+  }
+
+  if ( strcmp( cmd, "clear_pin" ) == 0 ) {
+    clearPin();
+    beepConfirm();
+    return okResponse( cmd, "{\"pinSet\":false}" );
+  }
+
   return errResponse( cmd, "Unknown command" );
 }
 
@@ -471,7 +471,7 @@ const char* buildTelemetryJson() {
 
   // 鍐呴儴 RAM 缁熻
   size_t heapFree = ESP.getFreeHeap();
-  size_t heapTotal = 327680;  // ESP32-S3 鍐呴儴 DRAM 鎬婚噺
+  size_t heapTotal = ESP.getHeapSize();  // ESP32-S3 鍐呴儴 DRAM 鎬婚噺
   const char* modeStr = ( pump.mode == MODE_TIME ) ? "TIME"
                       : ( pump.mode == MODE_JET )  ? "JET" : "VOLUME";
 
@@ -481,6 +481,7 @@ const char* buildTelemetryJson() {
     case PAUSED:      stateStr = "PAUSED";      break;
     case DONE:        stateStr = "DONE";        break;
     case ANTI_DRIP:   stateStr = "ANTI_DRIP";   break;
+    case STALL_ERROR: stateStr = "STALL_ERROR"; break;
     default: break;
   }
 

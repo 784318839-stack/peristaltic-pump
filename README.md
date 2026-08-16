@@ -4,6 +4,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。步进驱动采用 **TMC2226 独立芯片** (GPIO15 单线 UART 配置 + GPIO16/17/18 STEP/DIR 直连)。
 
+> **v2.5.0** (2026-08-15) — StallGuard 硬件堵转保护，自动断电，设备自检，网络控制 PIN，启动时序安全。
 > **v2.4.1** (2026-08-15) — 移除堵转检测与 BLE，修复 AP 热点名 (PumpCtrl-0000)。
 > **v2.4.0** (2026-07-30) — TMC2226 驱动迁移，CoolStep 自动电流，单线 UART 配置，16 细分。
 > **v2.3.7** (2026-07-29) — GPIO15 纯软件模拟单线半双工 UART (9600 bps)。
@@ -84,7 +85,7 @@
 
 ---
 
-## 功能清单 (15 项)
+## 功能清单 (19 项)
 
 ### 泵送模式
 
@@ -96,7 +97,7 @@
 
 ### 运行控制
 
-4. **暂停/恢复** — 运行中暂停，从断点恢复继续
+4. **暂停/恢复** — 运行中暂停，从断点精确恢复继续 (forceStopAndNewPosition 无过冲)
 5. **防滴回吸** — 完成后反转吸回 (ANTI_DRIP 状态，不可打断)
 6. **预灌/快排** — 全速 1500 mL/min 排空管路
 7. **匀加速** — FastAccelStepper 缓启动/缓停止，无冲击
@@ -108,21 +109,28 @@
 
 ### 存储
 
-10. **EEPROM 掉电记忆** — 全部参数 + 4 液体校准 + WiFi 配置
+10. **EEPROM 掉电记忆** — 全部参数 + 4 液体校准 + WiFi 配置 + 控制 PIN (NaN 位翻转防护)
 
 ### 管路维护
 
 11. **管路寿命追踪** — 累计流量统计，达到设定值提醒更换 (0=禁用)
 
+### 智能保护
+
+12. **自动关使能** — 待机/暂停/完成 5s 后电机自动断电；喷射间隔 >15s 时等待 2s 断电、喷射前 2s 通电，节能降热
+13. **StallGuard 堵转保护** — 硬件级负载检测 (SG_RESULT 连续低值 3 次判堵转)，停机电断 + 三连音 + 红灯快闪，仅接受 stop/reset
+
 ### 反馈
 
-12. **非阻塞蜂鸣器** — 7 种音效（按键/确认/取消/启动/暂停/完成/断电）
-13. **WS2812 状态灯** — 颜色随泵状态变化，管路寿命告警红灯闪烁
-14. **实时遥测** — `/api/status` 返回完整 JSON（状态/模式/参数/进度/WiFi 信息）
+14. **非阻塞蜂鸣器** — 7 种音效（按键/确认/取消/启动/暂停/完成/断电）
+15. **WS2812 状态灯** — 颜色随泵状态变化，管路寿命告警红灯闪烁
+16. **实时遥测** — `/api/status` 返回完整 JSON（状态/模式/参数/进度/WiFi 信息）
 
 ### 高级
 
-15. **多通道并发** — WiFi + USB 双通道同时工作，loop 单线程串行化无竞态
+17. **多通道并发** — WiFi + USB 双通道同时工作，loop 单线程串行化无竞态
+18. **设备自检** — `GET /api/selftest` / `selftest` 命令：TMC2226 通信、EEPROM 完整性、内存使用
+19. **网络控制 PIN** — 4-8 位数字 PIN 保护 HTTP 控制接口 (set_pin/clear_pin，默认不启用)
 
 ---
 
@@ -160,10 +168,11 @@ PC (USB) → USB-TTL 转接板 → ESP32
 |---|---|---|
 | GET | `/` | Web UI 页面 |
 | GET | `/api/status` | 完整遥测 JSON |
-| GET | `/api/cmd?c=<json>` | 发送命令 |
-| POST | `/api/wifi` | 配置 WiFi 连接 |
-| GET | `/api/scan` | 扫描附近 WiFi 网络 (同步, ~1s) |
+| GET | `/api/cmd?c=<cmd>&v=&m=&i=&p=<pin>` | 发送命令 (设置 PIN 后需携带 `p`) |
+| POST | `/api/wifi` | 配置 WiFi 连接 (body 含 `pin` 字段) |
+| GET | `/api/scan` | 扫描附近 WiFi 网络 (同步, ~1-4s, 不切模式不断连) |
 | GET | `/api/info` | 网络状态 (IP/模式/MAC/mDNS) |
+| GET | `/api/selftest` | 设备自检 (TMC2226 通信/EEPROM/内存) |
 
 ### 命令列表
 
@@ -188,6 +197,9 @@ PC (USB) → USB-TTL 转接板 → ESP32
 | `calib_enter` → … → `calib_save` | (5 步流程) | 校准向导 |
 | `prime_start` / `prime_stop` | — | 预灌快排 |
 | `get_state` | — | 获取完整状态遥测 |
+| `selftest` | — | 设备自检 (TMC2226/EEPROM/内存) |
+| `set_pin` | `value`: 4-8 位数字 | 设置网络控制 PIN (HTTP 接口) |
+| `clear_pin` | — | 清除网络控制 PIN (恢复无保护) |
 | `wifi_restart` | — | 重启 WiFi |
 | `menu_main` | — | 返回主菜单 |
 
@@ -227,6 +239,7 @@ PC (USB) → USB-TTL 转接板 → ESP32
 
 ```
 State:  IDLE → RUNNING → PAUSED (⇄ RUNNING) → ANTI_DRIP → DONE
+        RUNNING → STALL_ERROR (堵转, 仅接受 stop/reset)
 Mode:   MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 ```
 
@@ -344,6 +357,16 @@ peristaltic_pump/
 ---
 
 ## 更新日志
+
+### v2.5.0 (2026-08-15) — StallGuard 堵转保护与设备增强
+
+- **StallGuard 硬件堵转保护**: 运行中周期读取 `SG_RESULT`，连续 3 次低于阈值 (2) 判定堵转 → 立即停机 + 断电 + 三连音 + 红灯快闪 (STALL_ERROR)；高速 SpreadCycle 区间 (SG 无效) 自动跳过检测
+- **自动关使能**: 待机/暂停/完成 5s 后 ENN 断电；喷射间隔 >15s 时等待 2s 断电、喷射前 2s 通电
+- **启动时序安全**: 上电默认 ENN=HIGH (电机禁用)，首次启动时再使能，防止初始化期间误动作
+- **设备自检**: `GET /api/selftest` + `selftest` 命令 (TMC2226 通信 / EEPROM / 内存)，Web UI 高级设置面板一键自检
+- **网络控制 PIN**: `set_pin`/`clear_pin` 命令 + EEPROM 持久化；设置后 `/api/cmd`、`/api/wifi` 需要 PIN，前端自动附加并本地记忆
+- **加固**: EEPROM 加载 NaN/Inf 位翻转防护；`sw_uart` ISR 不再调用 `detachInterrupt` (移出 ISR 上下文)；`WiFi.softAP` 最大客户端 2→4；遥测 `heapTotal` 改用真实堆大小；前端更新防御缺失字段
+- **工程化**: 删除死代码 (命令队列 / `tmc2226_enable|disable` / 数字输入缓冲)；新增 GitHub Actions 自动编译 (`compile.yml`)；`generate_web_ui.py` 自动同步 `data/www/index.html`；删除 `build_web_ui.py` 与重复的 `tools/pump_cli.py`；版本号集中为 `FW_VERSION` 宏
 
 ### v2.4.1 (2026-08-15) — 移除堵转检测与 BLE，修复热点名
 
@@ -477,12 +500,12 @@ peristaltic_pump/
 
 ## 项目状态
 
-✅ **v2.4.1** (2026-08-15, 移除堵转检测与 BLE)
+✅ **v2.5.0** (2026-08-15, StallGuard 堵转保护 + 自动断电 + 自检 + PIN)
 
 | 版本 | 分支 | 驱动 |
 |------|------|------|
-| v2.4.1 | `tmc2226` | TMC2226 + CoolStep + StealthChop (无堵转检测/BLE) |
-| v2.4.0 | `tmc2226` | TMC2226 + CoolStep + StealthChop (含堵转检测/BLE) |
+| **v2.5.0** | **`tmc2226`** | TMC2226 + CoolStep + StallGuard (活跃开发) |
+| v2.4.1 | `tmc2226` | TMC2226 + CoolStep + StealthChop |
 | v2.3.8 | `master` | DM542 + 6N137 光耦 (原始版本) |
 
 所有已知问题已解决：

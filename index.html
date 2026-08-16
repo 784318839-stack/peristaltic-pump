@@ -139,12 +139,12 @@ button:active{transform:scale(.95);opacity:.8}
         <label>流量</label><input type="number" id="inFlow" value="50" step="0.1" min="0.1" max="1600" onchange="sendCmd('set_flow',{value:parseFloat(this.value)})"><span class="unit">mL/min</span>
       </div>
       <div class="input-row">
-        <label>体积</label><input type="number" id="inVolume" value="10" step="0.1" min="0.1" max="999.9" onchange="sendCmd('set_volume',{value:parseFloat(this.value)})"><span class="unit">mL</span>
+        <label>体积</label><input type="number" id="inVolume" value="10" step="0.1" min="0.1" max="99999" onchange="sendCmd('set_volume',{value:parseFloat(this.value)})"><span class="unit">mL</span>
       </div>
     </div>
     <div id="paramTime" style="display:none">
       <div class="input-row">
-        <label>体积</label><input type="number" id="inTimeVol" value="10" step="0.1" min="0.1" max="999.9" onchange="sendCmd('set_volume',{value:parseFloat(this.value)})"><span class="unit">mL</span>
+        <label>体积</label><input type="number" id="inTimeVol" value="10" step="0.1" min="0.1" max="99999" onchange="sendCmd('set_volume',{value:parseFloat(this.value)})"><span class="unit">mL</span>
       </div>
       <div class="input-row">
         <label>时间</label><input type="number" id="inTimeSec" value="30" step="1" min="1" max="86400" onchange="sendCmd('set_time',{value:parseFloat(this.value)})"><span class="unit">秒</span>
@@ -222,6 +222,15 @@ button:active{transform:scale(.95);opacity:.8}
       已用: <span id="advTotalDispensed" style="color:var(--accent)">--</span> mL |
       寿命: <span id="advTubePct" style="color:var(--accent)">--</span>%
     </div>
+    <div class="input-row">
+      <label>控制PIN</label><input type="password" id="inPin" placeholder="4-8位数字, 空=不启用" maxlength="8" style="font-size:14px">
+    </div>
+    <div class="btn-row">
+      <button class="btn-sm" onclick="pinSet()">设置PIN</button>
+      <button class="btn-sm" onclick="pinClear()">清除PIN</button>
+      <button class="btn-sm" onclick="selfTest()">🔍 设备自检</button>
+    </div>
+    <div style="font-size:12px;color:var(--text2);margin-top:6px" id="advSelfTest">--</div>
   </div>
 
   <!-- 设备信息 -->
@@ -308,11 +317,14 @@ function setConn(cls, text) {
   dot.className = cls; txt.textContent = text;
 }
 
+let pinVal = localStorage.getItem('pumpPin') || '';
+
 function sendCmd(cmd, params = {}) {
   if (!connected) {
     toast('未连接', true); return;
   }
   let url = '/api/cmd?c=' + cmd;
+  if (pinVal) url += '&p=' + pinVal;
   if (params.value !== undefined) url += '&v=' + params.value;
   if (params.slot !== undefined) url += '&s=' + params.slot;
   if (params.mode !== undefined) url += '&m=' + params.mode;
@@ -320,7 +332,9 @@ function sendCmd(cmd, params = {}) {
 
   fetch(url).then(r => r.json()).then(d => {
     if (!d || !d.ok) {
-      if (d && d.id && d.id !== 'get_state') toast('✗ ' + ((d && d.error) || '失败'), true);
+      if (d && d.error === 'Invalid PIN') {
+        toast('✗ PIN 错误，请在高级设置中填写', true);
+      } else if (d && d.id && d.id !== 'get_state') toast('✗ ' + ((d && d.error) || '失败'), true);
     } else {
       if (d.id === 'start') toast('▶ 已启动');
       else if (d.id === 'pause') toast('⏸ 已暂停');
@@ -336,6 +350,35 @@ function sendCmd(cmd, params = {}) {
   }).catch(function(e) { toast('请求失败', true); });
 }
 
+function pinSet() {
+  const v = $('#inPin').value.trim();
+  if (!/^\d{4,8}$/.test(v)) { toast('PIN 需为 4-8 位数字', true); return; }
+  pinVal = v;
+  localStorage.setItem('pumpPin', v);
+  sendCmd('set_pin', { value: v });
+  toast('PIN 已设置');
+}
+
+function pinClear() {
+  sendCmd('clear_pin');
+  pinVal = '';
+  localStorage.removeItem('pumpPin');
+  $('#inPin').value = '';
+  toast('PIN 已清除');
+}
+
+function selfTest() {
+  $('#advSelfTest').textContent = '自检中...';
+  fetch('/api/selftest').then(r => r.json()).then(d => {
+    $('#advSelfTest').innerHTML =
+      '固件: ' + (d.fw || '?') +
+      ' | TMC2226: ' + (d.tmc2226 ? '✅' : '❌ 通信失败') +
+      ' | EEPROM: ' + (d.eepromOk ? '✅' : ('⚠️ ' + (d.eepromMagic || '?'))) +
+      ' | PSRAM: ' + ((d.psramTotal || 0) - (d.psramFree || 0)) + '/' + (d.psramTotal || 0) + 'KB' +
+      ' | 堆: ' + (d.heapFree || 0) + '/' + (d.heapTotal || 0) + 'KB';
+  }).catch(function() { $('#advSelfTest').textContent = '自检失败'; });
+}
+
 function handlePauseResume() {
   if (currentState === 'PAUSED') {
     sendCmd('resume');
@@ -347,13 +390,13 @@ function handlePauseResume() {
 function updateUI(d) {
   currentState = d.state;
   currentMode = d.mode;
-  $('#stState').textContent = d.state;
-  $('#stMode').textContent = d.mode;
-  $('#stFlow').textContent = d.flow.toFixed(1);
-  $('#stDisp').textContent = d.dispensed.toFixed(2);
-  $('#stTarget').textContent = d.targetVol.toFixed(1);
-  $('#progressBar').style.width = d.progress + '%';
-  $('#stProgress').textContent = d.progress + '%';
+  $('#stState').textContent = d.state || '?';
+  $('#stMode').textContent = d.mode || '?';
+  $('#stFlow').textContent = (typeof d.flow === 'number') ? d.flow.toFixed(1) : '--';
+  $('#stDisp').textContent = (typeof d.dispensed === 'number') ? d.dispensed.toFixed(2) : '--';
+  $('#stTarget').textContent = (typeof d.targetVol === 'number') ? d.targetVol.toFixed(1) : '--';
+  $('#progressBar').style.width = (typeof d.progress === 'number' ? d.progress : 0) + '%';
+  $('#stProgress').textContent = (typeof d.progress === 'number' ? d.progress : 0) + '%';
   /* JET 模式运行状态 */
   var jetInfo = $('#stJetInfo');
   if (d.mode === 'JET' && d.state !== 'IDLE' && d.state !== 'DONE') {
@@ -370,8 +413,8 @@ function updateUI(d) {
     jetInfo.style.display = 'none';
   }
 
-  $('#stTotal').textContent = d.totalDispensed.toFixed(0);
-  $('#stTube').textContent = d.tubePct;
+  $('#stTotal').textContent = (typeof d.totalDispensed === 'number') ? d.totalDispensed.toFixed(0) : '--';
+  $('#stTube').textContent = (d.tubePct !== undefined) ? d.tubePct : '--';
   $('#stMotor').textContent = d.stepperEnabled ? '使能' : '断电';
   if (d.psramTotal > 0) {
     var psramUsed = d.psramTotal - d.psramFree;
@@ -405,11 +448,16 @@ function updateUI(d) {
   const isRunning = d.state === 'RUNNING';
   const isPaused = d.state === 'PAUSED';
   const isDone = d.state === 'DONE';
+  const isStall = d.state === 'STALL_ERROR';
 
   $('#btnStart').disabled = !(isIdle || isDone);
-  $('#btnStop').disabled = !(isRunning || isPaused);
+  $('#btnStop').disabled = !(isRunning || isPaused || isStall);
 
-  if (isPaused) {
+  if (isStall) {
+    $('#btnPause').disabled = true;
+    $('#btnPause').textContent = '⚠ 堵转';
+    $('#btnPause').className = 'btn-stop';
+  } else if (isPaused) {
     $('#btnPause').disabled = false;
     $('#btnPause').textContent = '▶ 继续';
     $('#btnPause').className = 'btn-start';
@@ -566,7 +614,7 @@ function wifiSave() {
   fetch('/api/wifi', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ssid, pass, mode: ssid ? 1 : 0})
+    body: JSON.stringify({ssid, pass, mode: ssid ? 1 : 0, pin: pinVal})
   }).then(r => r.json()).then(d => {
     if (d.ok) {
       toast('WiFi 配置已保存，网络已重启');

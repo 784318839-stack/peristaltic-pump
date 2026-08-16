@@ -37,6 +37,8 @@ struct PumpState {
   float calibNewSPM     = 0;
   bool          stepperEnabled      = true;
   unsigned long lastStepperActivity = 0;
+  int           sgLowCount          = 0;    // StallGuard 连续低值计数
+  unsigned long sgNextCheck         = 0;    // 下次 StallGuard 检测时刻
   bool eepromDirty = false;
   long          pausedRemainingSteps = 0;
   unsigned long pausedElapsedSec     = 0;

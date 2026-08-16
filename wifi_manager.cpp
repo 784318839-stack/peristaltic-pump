@@ -78,7 +78,7 @@ void initWiFi() {
 
   // 5. 配置 SoftAP (全功率 20dBm, 热管理已解决)
   WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);
-  WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 2);
+  WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 4);
   Serial.printf("[WIFI] AP SSID: %s\n", apSSID.c_str());
   esp_wifi_set_max_tx_power(80);  // 20dBm 全功率
   esp_wifi_set_ps(WIFI_PS_NONE);  // 禁用 WiFi 省电模式, 避免唤醒延迟导致步进电机卡顿

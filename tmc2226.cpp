@@ -197,15 +197,3 @@ void tmc2226_setup_defaults() {
 void tmc2226_init() {
   tmc2226_setup_defaults();
 }
-
-void tmc2226_enable() {
-  // TMC2226 上电默认已使能, GCONF 无单独 enable 位
-  // ENN 引脚物理控制使能 (由 pump_core 管理)
-}
-
-void tmc2226_disable() {
-  // 通过 TOFF=0 (CHOPCONF bits 3-0) 关闭电机输出
-  uint32_t chop = tmc2226_read(TMC_REG_CHOPCONF);
-  chop &= ~0xF;              // TOFF=0 = driver disable
-  tmc2226_write(TMC_REG_CHOPCONF, chop);
-}

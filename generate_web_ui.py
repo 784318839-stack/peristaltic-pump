@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Generate web_ui_gen.h from index.html for embedding in ESP32 firmware.
 
 Usage: python generate_web_ui.py
@@ -49,6 +49,12 @@ def main():
 
     dst.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Generated {dst} ({len(html)} bytes minified, {len(lines)} lines)")
+
+    # 同步未压缩副本到 SPIFFS 目录 (data/www), 保证两份 HTML 永远一致
+    www = Path(__file__).parent / "data" / "www" / "index.html"
+    www.parent.mkdir(parents=True, exist_ok=True)
+    www.write_text(html, encoding="utf-8")
+    print(f"Synced {www}")
 
 if __name__ == "__main__":
     main()

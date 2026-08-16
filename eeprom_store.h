@@ -20,4 +20,9 @@ void saveParams();
 // 从 EEPROM 加载参数 , 返回 false = 首次上电 / 数据损坏
 bool loadParams();
 
+// ---- 网络控制 PIN (空 = 不启用) ----
+bool loadPin(char* buf, size_t len);   // 读取 PIN 到 buf (含结尾 NUL), 返回 false = 未设置
+void savePin(const char* pin);         // 保存 PIN (4-8 位数字)
+void clearPin();                       // 清除 PIN
+
 #endif

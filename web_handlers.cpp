@@ -14,6 +14,7 @@
 #include "wifi_manager.h"
 #include "pump_shared.h"
 #include "pump_state.h"
+#include "tmc2226.h"
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <ArduinoJson.h>
@@ -22,6 +23,9 @@
 //                            HTTP 鏈嶅姟鍣?
 // ============================================================================
 static WiFiServer server(80);
+
+// 网络控制 PIN (空 = 不启用, 启动时从 EEPROM 加载)
+static char g_pin[PIN_MAX_LEN + 1] = "";
 
 // 鍐呭祵 Web UI
 #include "web_ui_gen.h"
@@ -135,8 +139,14 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii -> 鍛戒护
+  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii&p=pin -> 鍛戒护
   if (method == "GET" && path.startsWith("/api/cmd")) {
+    // PIN 校验 (已设置时, 网络控制必须携带匹配 p 参数)
+    if (g_pin[0] && getQueryParam(path, "p") != g_pin) {
+      sendJson(client, 401, "{\"ok\":false,\"error\":\"Invalid PIN\"}");
+      return;
+    }
+
     String cmd = getQueryParam(path, "c");
     String val = getQueryParam(path, "v");
     String slot = getQueryParam(path, "s");
@@ -148,15 +158,28 @@ static void handleRequest(WiFiClient &client, const String &method,
       return;
     }
 
+    // 转义 cmd/mode, 防止特殊字符破坏 JSON 结构
+    String cmdEsc, modeEsc;
+    for (unsigned int i = 0; i < cmd.length(); i++) {
+      char ch = cmd.charAt(i);
+      if (ch == '"' || ch == '\\') cmdEsc += '\\';
+      cmdEsc += ch;
+    }
+    for (unsigned int i = 0; i < mode.length(); i++) {
+      char ch = mode.charAt(i);
+      if (ch == '"' || ch == '\\') modeEsc += '\\';
+      modeEsc += ch;
+    }
+
     String params;
     if (val.length() > 0) params += "\"value\":" + val;
     if (slot.length() > 0) {
       if (params.length() > 0) params += ",";
       params += "\"slot\":" + slot;
     }
-    if (mode.length() > 0) {
+    if (modeEsc.length() > 0) {
       if (params.length() > 0) params += ",";
-      params += "\"mode\":\"" + mode + "\"";
+      params += "\"mode\":\"" + modeEsc + "\"";
     }
     if (idx.length() > 0) {
       if (params.length() > 0) params += ",";
@@ -165,13 +188,33 @@ static void handleRequest(WiFiClient &client, const String &method,
 
     String jsonCmd;
     if (params.length() > 0) {
-      jsonCmd = "{\"cmd\":\"" + cmd + "\",\"params\":{" + params + "}}";
+      jsonCmd = "{\"cmd\":\"" + cmdEsc + "\",\"params\":{" + params + "}}";
     } else {
-      jsonCmd = "{\"cmd\":\"" + cmd + "\",\"params\":{}}";
+      jsonCmd = "{\"cmd\":\"" + cmdEsc + "\",\"params\":{}}";
     }
 
     const char* resp = parseAndExecute(jsonCmd.c_str());
     sendJson(client, 200, resp);
+    return;
+  }
+
+  // GET /api/selftest -> 设备自检 (TMC2226 通信 / EEPROM / 内存)
+  if (method == "GET" && path.startsWith("/api/selftest")) {
+    uint32_t ioin = tmc2226_read(TMC_REG_IOIN);
+    bool tmcOk = (ioin != 0) && (((ioin & 0x10) != 0) || ((ioin & 0x0F0000) != 0));
+    uint16_t magic = 0;
+    EEPROM.get(EEPROM_ADDR, magic);
+    char buf[384];
+    snprintf(buf, sizeof(buf),
+      "{\"fw\":\"%s\",\"tmc2226\":%s,\"ioin\":\"0x%08lX\","
+      "\"eepromMagic\":\"0x%04X\",\"eepromOk\":%s,"
+      "\"psramFree\":%d,\"psramTotal\":%d,\"heapFree\":%d,\"heapTotal\":%d}",
+      FW_VERSION,
+      tmcOk ? "true" : "false", (unsigned long)ioin,
+      magic, (magic == EEPROM_MAGIC) ? "true" : "false",
+      (int)(ESP.getFreePsram() / 1024), (int)(ESP.getPsramSize() / 1024),
+      (int)(ESP.getFreeHeap() / 1024), (int)(ESP.getHeapSize() / 1024));
+    sendJson(client, 200, buf);
     return;
   }
 
@@ -181,6 +224,13 @@ static void handleRequest(WiFiClient &client, const String &method,
     DeserializationError err = deserializeJson(doc, body);
     if (err) {
       sendJson(client, 400, "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+      return;
+    }
+
+    // PIN 校验
+    const char* pinField = doc["pin"] | "";
+    if (g_pin[0] && strcmp(pinField, g_pin) != 0) {
+      sendJson(client, 401, "{\"ok\":false,\"error\":\"Invalid PIN\"}");
       return;
     }
 
@@ -281,6 +331,8 @@ static void handleRequest(WiFiClient &client, const String &method,
 // ============================================================================
 
 void initWebServer() {
+  loadPin(g_pin, sizeof(g_pin));
+  if (g_pin[0]) Serial.printf("[WEB] PIN protection enabled\n");
   server.begin();
 }
 

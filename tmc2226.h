@@ -49,7 +49,5 @@ void tmc2226_setup_defaults();              // 写入推荐默认参数
 void tmc2226_write(uint8_t reg, uint32_t data);
 uint32_t tmc2226_read(uint8_t reg);
 bool tmc2226_test_comm();                   // 通信测试 (读 IOIN/GSTAT)
-void tmc2226_enable();                      // 软件使能 (写 GCONF)
-void tmc2226_disable();                     // 软件关闭
 
 #endif // TMC2226_H

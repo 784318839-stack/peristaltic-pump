@@ -1,0 +1,29 @@
+name: Compile Firmware
+
+on:
+  push:
+    branches: [master, tmc2226]
+  pull_request:
+    branches: [master, tmc2226]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile main firmware
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,FlashSize=16M,CPUFreq=160,USBMode=hwcdc
+          platforms: |
+            - name: esp32:esp32
+              source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+              version: 3.3.10
+          libraries: |
+            - FastAccelStepper
+            - ArduinoJson
+            - Adafruit NeoPixel
+          sketch-paths: |
+            - peristaltic_pump_TMC2226/peristaltic_pump_TMC2226.ino
+          enable-deltas-report: true

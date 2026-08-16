@@ -36,6 +36,7 @@ void startPump() {
   pump.pumpElapsed = 0;
   pump.pumpStartMs = millis();
   pump.dispensedVolume = 0;
+  pump.sgLowCount = 0; pump.sgNextCheck = millis() + SG_CHECK_INTERVAL_MS;
   int32_t totalSteps = (int32_t)(pump.targetVolume * pump.stepsPerMl);
   stepper->setCurrentPosition(0);
   stepper->moveTo(totalSteps);
@@ -108,7 +109,7 @@ void selectLiquid(int idx) {
 void calibEnter() {
   pump.calibStep = CALIB_SELECT_LIQUID; pump.calibTargetVol = 10.0;
   pump.calibActualVol = 0; pump.calibStepsRun = 0; pump.calibNewSPM = 0;
-  pump.calibRunning = false; inputClear(); pump.currentMenu = CALIBRATE;
+  pump.calibRunning = false; pump.currentMenu = CALIBRATE;
 }
 
 void calibStartRun() {
@@ -133,10 +134,3 @@ void calibCalculate() {
 }
 
 void calibSave() { pump.stepsPerMl = pump.calibNewSPM; pump.liquidSPM[pump.currentLiquid] = pump.calibNewSPM; markDirty(); saveParams(); }
-
-static char inputBuf[8] = "";
-static int  inputLen = 0;
-void inputClear() { memset(inputBuf, 0, sizeof(inputBuf)); inputLen = 0; }
-void inputBackspace() { if (inputLen > 0) inputBuf[--inputLen] = 0; }
-void inputAppend(char c) { if (inputLen < 6) inputBuf[inputLen++] = c; }
-float inputToFloat() { return (inputLen == 0) ? 0 : atof(inputBuf); }

@@ -55,10 +55,14 @@ static bool bufPush(uint8_t byte) {
 // ============================================================================
 //                         中断服务例程
 // ============================================================================
+// 注意: 不在 ISR 里调 detachInterrupt (内部会释放 handler, ISR 上下文不安全)。
+// ISR 只记录首个下降沿时刻; 真正的中断摘除由 swuart_tick() 在非 ISR 上下文完成,
+// 摘除前数据位的后续边沿被 g_rxPending 门闩忽略。
 static void IRAM_ATTR swuart_isr() {
-  g_startUs    = micros();
-  g_rxPending  = true;
-  detachInterrupt(g_pin);
+  if (!g_rxPending) {
+    g_startUs   = micros();
+    g_rxPending = true;
+  }
 }
 
 // ============================================================================
@@ -101,6 +105,9 @@ void swuart_tick() {
     g_rxPending = false;
     return;
   }
+
+  // 开始采样: 在非 ISR 上下文摘除中断, 防止数据位边沿干扰
+  detachInterrupt(g_pin);
 
   unsigned long startUs = g_startUs;
   uint32_t bt = g_bitTimeUs;

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Peristaltic Pump Controller v3 — YZ1515 precision dispensing / jet workstation
  * Hardware: ESP32-S3-WROOM-1-N16 (16 MB Flash)
- * v2.4.1: 移除堵转检测与 BLE；修复 AP 热点名 (esp_read_mac) 与 WiFi 扫描断连
+ * v2.5.0: StallGuard 堵转保护, 自动断电, 自检, 网络 PIN, 启动时序安全
  ******************************************************************************/
 
 #include <Arduino.h>
@@ -50,15 +50,14 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT); digitalWrite(BUZZER_PIN, LOW);
   pinMode(STEP_PIN, OUTPUT); digitalWrite(STEP_PIN, LOW);
   pinMode(DIR_PIN, OUTPUT); digitalWrite(DIR_PIN, LOW);
-  pinMode(ENA_PIN, OUTPUT); digitalWrite(ENA_PIN, LOW);
+  // 启动时序安全: 上电先禁用电机 (ENN=HIGH), 首次启动时 ensureStepperOn() 再使能
+  pinMode(ENA_PIN, OUTPUT); digitalWrite(ENA_PIN, HIGH);
+  pump.stepperEnabled = false;
 
   stepperEngine.init();
   stepper = stepperEngine.stepperConnectToPin(STEP_PIN);
   if (stepper) {
     stepper->setDirectionPin(DIR_PIN);
-    // TMC2226 ENN 低有效: LOW=使能
-    digitalWrite(ENA_PIN, LOW);
-    pump.stepperEnabled = true;
   }
   pump.lastStepperActivity = millis();
   updateStepperSpeed();
@@ -91,6 +90,15 @@ void loop() {
   wifiMaintain();
 
   pump_machine_tick();
+
+  // 自动断电: 待机/暂停/完成 5s 后关闭电机使能 (TMC2226 ENN=HIGH, 节能降热)
+  if (pump.stepperEnabled &&
+      (pump.state == STATE_IDLE || pump.state == PAUSED || pump.state == DONE) &&
+      millis() - pump.lastStepperActivity > AUTO_OFF_MS) {
+    digitalWrite(ENA_PIN, HIGH);
+    pump.stepperEnabled = false;
+    beepDisable();
+  }
 
   if (pump.eepromDirty && (pump.state == STATE_IDLE || pump.state == DONE)) saveParams();
 

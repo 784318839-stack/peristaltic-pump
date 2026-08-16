@@ -1,5 +1,5 @@
 /******************************************************************************
- * pump_core.h — 步进电机控制 / 泵状态机 / 校准 / 输入缓冲
+ * pump_core.h — 步进电机控制 / 泵状态机 / 校准
  *
  * 本模块封装所有泵送核心逻辑 , 供 .ino 和远程命令模块调用
  ******************************************************************************/
@@ -37,11 +37,5 @@ void calibStopRun();
 void calibFinishRun();
 void calibCalculate();
 void calibSave();
-
-// ---- 数字输入缓冲 ( 所有参数输入界面共用 ) ----
-void  inputClear();
-void  inputBackspace();
-void  inputAppend( char c );
-float inputToFloat();
 
 #endif
