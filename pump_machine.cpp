@@ -100,20 +100,24 @@ static void tick_running() {
     }
 
     // StallGuard 硬件堵转检测 (仅 StealthChop 速度区间, SG_RESULT 才有效)
+    // 注意: 通信失败 (read_ex=false) 时跳过且不计数, 避免误判堵转
     if (millis() >= pump.sgNextCheck) {
       pump.sgNextCheck = millis() + SG_CHECK_INTERVAL_MS;
       uint32_t pps = (uint32_t)flowRateToPPS(pump.flowRate);
       if (pps <= SG_MAX_PPS) {
-        uint32_t sg = tmc2226_read(TMC_REG_SG_RESULT) & 0x3FF;
-        if (sg <= SG_STALL_THRESHOLD) {
-          if (++pump.sgLowCount >= SG_STALL_CONSECUTIVE) {
-            Serial.printf("[STALL] SG_RESULT=%lu, stopping\n", (unsigned long)sg);
-            stepper->forceStopAndNewPosition(stepper->getCurrentPosition());
-            digitalWrite(ENA_PIN, HIGH); pump.stepperEnabled = false;
-            pump_machine_transition(STALL_ERROR);
+        uint32_t sg = 0;
+        if (tmc2226_read_ex(TMC_REG_SG_RESULT, &sg)) {
+          sg &= 0x3FF;
+          if (sg <= SG_STALL_THRESHOLD) {
+            if (++pump.sgLowCount >= SG_STALL_CONSECUTIVE) {
+              Serial.printf("[STALL] SG_RESULT=%lu, stopping\n", (unsigned long)sg);
+              stepper->forceStopAndNewPosition(stepper->getCurrentPosition());
+              digitalWrite(ENA_PIN, HIGH); pump.stepperEnabled = false;
+              pump_machine_transition(STALL_ERROR);
+            }
+          } else {
+            pump.sgLowCount = 0;
           }
-        } else {
-          pump.sgLowCount = 0;
         }
       } else {
         pump.sgLowCount = 0;

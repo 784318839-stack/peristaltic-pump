@@ -48,6 +48,7 @@ void tmc2226_init();                        // 上电初始化, 写默认配置
 void tmc2226_setup_defaults();              // 写入推荐默认参数
 void tmc2226_write(uint8_t reg, uint32_t data);
 uint32_t tmc2226_read(uint8_t reg);
+bool tmc2226_read_ex(uint8_t reg, uint32_t* out);  // 返回 false = 通信失败 (超时/CRC 错), 用于区分"寄存器值为 0"
 bool tmc2226_test_comm();                   // 通信测试 (读 IOIN/GSTAT)
 
 #endif // TMC2226_H

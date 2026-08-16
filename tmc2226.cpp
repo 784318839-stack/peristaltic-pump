@@ -61,7 +61,7 @@ static void tmc2226_write_raw(uint8_t reg, uint32_t data) {
   delayMicroseconds(1200);
 }
 
-static uint32_t tmc2226_read_raw(uint8_t reg) {
+static bool tmc2226_read_raw_ex(uint8_t reg, uint32_t* out) {
   // 1. 发读请求: [0x05] [addr] [reg|R] [CRC]
   uint8_t req[4];
   req[0] = 0x05;                        // 同步字节
@@ -90,25 +90,25 @@ static uint32_t tmc2226_read_raw(uint8_t reg) {
   }
 
   // 3. 解析响应
-  if (len < 8) return 0;  // 超时或短帧
+  if (len < 8) return false;  // 超时或短帧
 
   // 找 sync 字节位置
   int syncIdx = -1;
   for (int i = 0; i <= len - 8; i++) {
     if (resp[i] == 0x05) { syncIdx = i; break; }
   }
-  if (syncIdx < 0 || len - syncIdx < 8) return 0;
+  if (syncIdx < 0 || len - syncIdx < 8) return false;
 
   // 验证 CRC (覆盖 sync..D0 = 7 bytes)
-  if (crc8(resp + syncIdx, 7) != resp[syncIdx + 7]) return 0;
+  if (crc8(resp + syncIdx, 7) != resp[syncIdx + 7]) return false;
 
   // 组装 32-bit 数据 (跳过 reg 回显字节)
-  uint32_t data = ((uint32_t)resp[syncIdx + 3] << 24)
-                | ((uint32_t)resp[syncIdx + 4] << 16)
-                | ((uint32_t)resp[syncIdx + 5] << 8)
-                |  (uint32_t)resp[syncIdx + 6];
+  *out = ((uint32_t)resp[syncIdx + 3] << 24)
+       | ((uint32_t)resp[syncIdx + 4] << 16)
+       | ((uint32_t)resp[syncIdx + 5] << 8)
+       |  (uint32_t)resp[syncIdx + 6];
 
-  return data;
+  return true;
 }
 
 // ============================================================================
@@ -119,7 +119,14 @@ void tmc2226_write(uint8_t reg, uint32_t data) {
 }
 
 uint32_t tmc2226_read(uint8_t reg) {
-  return tmc2226_read_raw(reg);
+  uint32_t v = 0;
+  tmc2226_read_raw_ex(reg, &v);
+  return v;
+}
+
+bool tmc2226_read_ex(uint8_t reg, uint32_t* out) {
+  if (!out) return false;
+  return tmc2226_read_raw_ex(reg, out);
 }
 
 bool tmc2226_test_comm() {
