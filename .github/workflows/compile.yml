@@ -29,6 +29,10 @@ jobs:
 
       - name: Compile firmware
         run: |
+          # Arduino 要求草图文件夹名与 .ino 同名; runner 上 checkout 目录是仓库名
+          # (peristaltic-pump), 因此先复制到名称匹配的目录再编译
+          mkdir -p "$RUNNER_TEMP/sketch/peristaltic_pump_TMC2226"
+          cp ./*.ino ./*.h ./*.cpp "$RUNNER_TEMP/sketch/peristaltic_pump_TMC2226/"
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,FlashSize=16M,CPUFreq=160,USBMode=hwcdc" \
-            peristaltic_pump_TMC2226.ino
+            "$RUNNER_TEMP/sketch/peristaltic_pump_TMC2226"
