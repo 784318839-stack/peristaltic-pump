@@ -275,6 +275,7 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "calib_start_run" ) == 0 ) {
     if ( pump.currentMenu != CALIBRATE || pump.calibStep != CALIB_RUN )
       return errResponse( cmd, "Not at calib run step" );
+    if ( pump.calibRunning ) return errResponse( cmd, "Calib already running" );
     calibStartRun();
     return okResponse( cmd );
   }
@@ -313,8 +314,9 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "calib_abort" ) == 0 ) {
     pump.currentMenu = MAIN;
     pump.calibStep = CALIB_IDLE;
+    if ( pump.calibSavedTargetVol > 0 ) pump.targetVolume = pump.calibSavedTargetVol;
     pump.calibRunning = false;
-    if ( pump.state == RUNNING ) stopPump();
+    stopPump();
     beepCancel();
     return okResponse( cmd );
   }

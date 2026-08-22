@@ -349,7 +349,7 @@ void handleWebClients() {
   while (client.connected() && millis() < timeout) {
     if (client.available()) {
       char c = client.read();
-      request += c;
+      if (request.length() < 4096) request += c;
       timeout = millis() + 200;  // 姣忔璇诲彇閲嶇疆瓒呮椂
 
       if (!headersDone) {

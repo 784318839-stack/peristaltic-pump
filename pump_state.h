@@ -32,6 +32,7 @@ struct PumpState {
   int   completionCount = 0;
   bool  calibRunning    = false;
   float calibTargetVol  = 10.0;
+  float calibSavedTargetVol = 0;
   float calibActualVol  = 0;
   long  calibStepsRun   = 0;
   float calibNewSPM     = 0;
@@ -41,7 +42,7 @@ struct PumpState {
   unsigned long sgNextCheck         = 0;    // 下次 StallGuard 检测时刻
   bool eepromDirty = false;
   long          pausedRemainingSteps = 0;
-  unsigned long pausedElapsedSec     = 0;
+  unsigned long pausedElapsedMs    = 0;
   PumpState() { for (int i = 0; i < NUM_LIQUIDS; i++) liquidSPM[i] = 2000.0; }
 };
 

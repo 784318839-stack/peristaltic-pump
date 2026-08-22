@@ -58,7 +58,7 @@ void pausePump() {
   int32_t posAtPause = stepper->getCurrentPosition();
   pump.pausedRemainingSteps = stepper->targetPos() - posAtPause;
   stepper->forceStopAndNewPosition(posAtPause);
-  if (pump.mode == MODE_TIME) pump.pausedElapsedSec = (millis() - pump.pumpStartMs) / 1000;
+  if (pump.mode == MODE_TIME) pump.pausedElapsedMs = millis() - pump.pumpStartMs;
   pump_machine_transition(PAUSED);
 }
 
@@ -66,15 +66,20 @@ void resumePump() {
   ensureStepperOn();
   updateStepperSpeed();
   beepStart();
-  if (pump.mode == MODE_TIME) pump.pumpStartMs = millis() - pump.pausedElapsedSec * 1000;
+  if (pump.mode == MODE_TIME) pump.pumpStartMs = millis() - pump.pausedElapsedMs;
   stepper->moveTo(stepper->getCurrentPosition() + pump.pausedRemainingSteps);
   pump_machine_transition(RUNNING);
 }
 
 void resetPump() {
   pump.dispensedVolume = 0; pump.pumpElapsed = 0;
-  pump.pausedRemainingSteps = 0; pump.pausedElapsedSec = 0;
-  pump.currentMenu = MAIN;   // 防止预灌(PRIME)等状态下 stop 后菜单残留导致卡死
+  pump.pausedRemainingSteps = 0; pump.pausedElapsedMs = 0;
+  if (pump.calibRunning) {
+    if (pump.calibSavedTargetVol > 0) pump.targetVolume = pump.calibSavedTargetVol;
+    pump.calibStep = CALIB_IDLE;   // stop/reset 中断校准运行 = 整场放弃, 复位向导
+  }
+  pump.calibRunning = false;
+  pump.currentMenu = MAIN;
   stepper->setCurrentPosition(0);
   pump_machine_transition(STATE_IDLE);
 }
@@ -116,15 +121,16 @@ void calibStartRun() {
   if (pump.calibTargetVol <= 0) return;
   ensureStepperOn(); updateStepperSpeed();
   pump.dispensedVolume = 0;
-  pump.targetVolume = pump.calibTargetVol;  // 让遥测 progress 反映校准进度
+  pump.calibSavedTargetVol = pump.targetVolume;
+  pump.targetVolume = pump.calibTargetVol;
   int32_t totalSteps = (int32_t)(pump.calibTargetVol * pump.stepsPerMl);
   stepper->setCurrentPosition(0); stepper->moveTo(totalSteps);
   pump.calibRunning = true;
   pump_machine_transition(RUNNING);
 }
 
-void calibStopRun() { pump.calibStepsRun = stepper->getCurrentPosition(); stopStepperExact(); pump.calibRunning = false; pump_machine_transition(STATE_IDLE); }
-void calibFinishRun() { pump.calibStepsRun = stepper->getCurrentPosition(); pump.calibRunning = false; pump.calibStep = CALIB_MEASURE; pump_machine_transition(DONE); }
+void calibStopRun() { pump.calibStepsRun = stepper->getCurrentPosition(); stopStepperExact(); pump.calibRunning = false; pump.targetVolume = pump.calibSavedTargetVol; pump_machine_transition(STATE_IDLE); }
+void calibFinishRun() { pump.calibStepsRun = stepper->getCurrentPosition(); pump.calibRunning = false; pump.targetVolume = pump.calibSavedTargetVol; pump.calibStep = CALIB_MEASURE; pump_machine_transition(DONE); }
 
 void calibCalculate() {
   if (pump.calibActualVol > 0 && pump.calibStepsRun > 0) {
