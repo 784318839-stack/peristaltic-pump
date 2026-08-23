@@ -1,7 +1,7 @@
 /******************************************************************************
  * Peristaltic Pump Controller v3 — YZ1515 precision dispensing / jet workstation
  * Hardware: ESP32-S3-WROOM-1-N16 (16 MB Flash)
- * v2.5.0: StallGuard 堵转保护, 自动断电, 自检, 网络 PIN, 启动时序安全
+ * v2.5.1: 修复 SoftAP 不广播 (esp_wifi_restore 抹掉 AP_STA), STA 断线重连, mDNS 重注册
  ******************************************************************************/
 
 #include <Arduino.h>

@@ -23,7 +23,7 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 // ============================================================================
 //                              Constants
 // ============================================================================
-#define FW_VERSION "2.5.0"   // 固件版本 (hello 报文 / 自检 / 遥测共用)
+#define FW_VERSION "2.5.1"   // 固件版本 (hello 报文 / 自检 / 遥测共用)
 #define NUM_LIQUIDS 4
 #define STEP_PIN   16
 #define DIR_PIN    17

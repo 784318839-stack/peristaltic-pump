@@ -4,6 +4,7 @@
 
 基于 ESP32-S3 的蠕动泵智能控制器，驱动 YZ1515 工业泵头，实现**体积模式、时间模式、喷射模式**三种精密流体控制。步进驱动采用 **TMC2226 独立芯片** (GPIO15 单线 UART 配置 + GPIO16/17/18 STEP/DIR 直连)。
 
+> **v2.5.1** (2026-08-24) — 修复 SoftAP 完全不广播（`esp_wifi_restore()` 抹掉 AP_STA 模式），STA 断线自动重连，mDNS 在 STA 就绪后重注册。
 > **v2.5.0** (2026-08-15) — StallGuard 硬件堵转保护，自动断电，设备自检，网络控制 PIN，启动时序安全。
 > **v2.4.1** (2026-08-15) — 移除堵转检测与 BLE，修复 AP 热点名 (PumpCtrl-0000)。
 > **v2.4.0** (2026-07-30) — TMC2226 驱动迁移，CoolStep 自动电流，单线 UART 配置，16 细分。
@@ -37,9 +38,16 @@
 - **STA 连接家里 WiFi**: Web UI → WiFi 设置 → 输入 SSID/密码 → 保存
   - 连接成功后页面弹出 `✅ WiFi 已连接` 提示
   - header 实时显示可访问地址 `http://STA_IP | http://pump.local`
-  - STA 失败不影响 SoftAP，30s 超时自动放弃
+  - STA 失败不影响 SoftAP，30s 超时自动放弃，**之后每 60s 自动重试** (v2.5.1)
+  - **掉线自动重连** (v2.5.1)：路由器重启 / 信号丢失后自动恢复，无需手动干预
   - 密码 XOR 加密存储 (设备 MAC 密钥)，拆机读 EEPROM 是乱码
+- **mDNS**: `pump.local` 在 STA 拿到 IP 后重新注册 (v2.5.1)，否则只绑定 AP 网段、局域网侧解析不到
 - 配置保存在 EEPROM，掉电不丢失
+- **串口诊断**: 启动打印 `[WIFI] AP SSID` / `AP IP + mode` / `STA connecting` / `STA connected: IP/RSSI/ch`，连接失败打印 `status=` 错误码
+
+> ⚠️ **单射频限制**: ESP32 只有一路 2.4G 射频，AP 与 STA 必须同信道。SoftAP 固定 channel 1，STA 一旦连上其它信道的路由器，AP 会被强制跳台，此时挂在热点上的客户端会掉线一次。属芯片限制，非缺陷。
+
+> 💡 **`pump.local` 打不开但 IP 能开？** 先排查本机代理软件（Clash / v2ray 等）：系统代理绕过列表通常含 `192.168.*` 却不含 `*.local`，导致域名被转发到远程节点。在代理的 Bypass 里加 `*.local` 即可。用 `ping pump.local` 能通即说明设备侧 mDNS 正常。
 - **WiFi 扫描**: 同步扫描 (~1-4s, 结果缓存 15s), 扫描期间不切模式不断连, 自动过滤自身 AP, 点击 SSID 自动填入
 - **密码可见**: 👁 按钮切换明文/密文
 
@@ -358,6 +366,40 @@ peristaltic_pump/
 
 ## 更新日志
 
+### v2.5.1 (2026-08-24) — WiFi 修复：SoftAP 不广播 / STA 永不重连
+
+**🔴 修复 SoftAP 完全搜不到 (回归自 v2.4.1)**
+
+现象：串口日志全部正常打印到 `[SETUP] done`，无崩溃无重启，但手机 WiFi 列表里根本没有 `PumpCtrl-XXXX`。
+
+根因是两个问题叠加，互相掩盖：
+
+1. **`esp_wifi_restore()` 抹掉了刚设好的模式** — v2.4.1 为清理 NVS 幽灵 AP 引入该调用，但它紧跟在 `WiFi.mode(WIFI_AP_STA)` 之后执行，而 ESP-IDF 文档明确说明该 API 会重置 `esp_wifi_set_mode()` 的结果。双模被打回默认，随后 `WiFi.softAP()` 因无 AP 接口而失败。已移除 —— 幽灵 AP 由 `persistent(false)` + `softAPdisconnect(true)` 解决即可，如仍有 NVS 残留请用 IDE 的 "Erase All Flash" 清一次。
+2. **`WiFi.softAP()` 返回值被丢弃** — AP 建失败也照常 `Serial.printf("[WIFI] AP SSID: ...")`，日志呈现"假绿"，把排查引向错误方向。现改为检查返回值，失败打印 `[WIFI] softAP() FAILED! mode=X`。
+
+实测佐证：移除该调用后 `[WIFI] MAC` → `[WIFI] AP SSID` 的耗时从 **1253ms 降至 330ms**，省掉的 923ms 正是 mode 被抹掉后底层重建的开销。
+
+**🔴 修复 STA 掉线后永不重连**
+
+`wifiMaintain()` 首行 `if (!staConnecting) return;` 导致该函数在连上（或 30s 超时）后彻底失效：路由器重启、信号丢失、连接超时放弃后均不再尝试。重写为三态机 —— 已连接（监控掉线）/ 连接中（等结果）/ 空闲（每 60s 重试）。
+
+**🔴 修复 `pump.local` 在局域网侧解析不到**
+
+`MDNS.begin("pump")` 在 `initWiFi()` 末尾执行，此时 STA 刚发起连接、尚无 IP，mDNS 只注册到 AP 接口。原注释"mDNS 已在 initWiFi 注册好, 无需重注册"的假设不成立。现于 `wifiMaintain()` 检测到 STA 连上后 `MDNS.end()` + 重新 `begin()`。
+
+**串口诊断增强**
+
+STA 侧此前完全无日志，故障全靠猜。新增：
+- `[WIFI] AP IP: <ip>  mode=<n>  clients=<n>` — `mode=3` 即 `WIFI_MODE_APSTA`，可直接确认双模是否成立
+- `[WIFI] STA connecting to "<ssid>" ...` / `[WIFI] STA skipped (hasConfig=0 mode=0 ssid="")` — 区分"未配置"与"EEPROM 读坏"
+- `[WIFI] STA connected: IP=<ip>  RSSI=<n> dBm  ch=<n>`
+- `[WIFI] STA connect failed (status=<n>), retry in 60s` — `status=1` 找不到 SSID / `status=4` 密码错
+- `[WIFI] STA lost (status=<n>), will retry` / `[WIFI] mDNS re-registered -> pump.local`
+
+**已知遗留**
+
+- `restartWiFi()`（Web UI 保存 WiFi 配置时触发）走运行时重初始化，日志会出现 `wifi_init_default: netstack cb reg failed with 12308` 与 `mdns_service_add_for_host: Service already exists` 两条 ERROR，该次运行状态不干净。冷启动可绕过。后续拟改为保存后 `ESP.restart()`。
+
 ### v2.5.0 (2026-08-15) — StallGuard 堵转保护与设备增强
 
 - **StallGuard 硬件堵转保护**: 运行中周期读取 `SG_RESULT`，连续 3 次低于阈值 (2) 判定堵转 → 立即停机 + 断电 + 三连音 + 红灯快闪 (STALL_ERROR)；高速 SpreadCycle 区间 (SG 无效) 自动跳过检测
@@ -373,7 +415,7 @@ peristaltic_pump/
 - **移除堵转检测**: 删除 `STALL_ERROR` 状态、`stallLastPosition`/`stallCheckTime` 字段与 `STALL_TIMEOUT_MS`，状态机简化为 IDLE → RUNNING → PAUSED → ANTI_DRIP → DONE
 - **移除 BLE UART**: 删除 `bluetooth_manager.h/cpp` 与 NimBLE-Arduino 依赖，控制接口保留 WiFi Web UI / USB Serial / 硬件 UART 三通道
 - Web UI 同步移除堵转告警分支
-- **修复热点名变成 `PumpCtrl-0000`**: arduino-esp32 核心 3.3.x 的 `WiFi.macAddress()` 在 WiFi 初始化前调用会失败（netif 未创建），读到栈残留导致 MAC 后缀为 0000；改用 `esp_read_mac()` 读 eFuse MAC，并一次性 `esp_wifi_restore()` 清理 NVS 旧配置
+- **修复热点名变成 `PumpCtrl-0000`**: arduino-esp32 核心 3.3.x 的 `WiFi.macAddress()` 在 WiFi 初始化前调用会失败（netif 未创建），读到栈残留导致 MAC 后缀为 0000；改用 `esp_read_mac()` 读 eFuse MAC，并一次性 `esp_wifi_restore()` 清理 NVS 旧配置 —— ⚠️ **`esp_wifi_restore()` 已于 v2.5.1 移除**，它会连带重置 `WiFi.mode()`，导致 SoftAP 彻底不广播；`esp_read_mac()` 的修复保留有效
 - **修复 WiFi 扫描断连**: 删除扫描失败的 STA-only 回退（`WiFi.mode(WIFI_STA)` 会关闭 AP，把热点上的客户端全部踢下线）；core 3.3.x 扫描实现已重写，始终在 AP+STA 双模下扫描，不再切模式
 - **修复暂停/恢复过冲**: 改用 `forceStopAndNewPosition()` 立即停止并丢弃队列（原 `forceStop()` 排空 ~20ms 已排程脉冲导致恢复时多走行程，最大流量下 ≈0.5 mL）；暂停前先快照原始目标位置，恢复落点精确
 - **修复预灌停止后卡死**: `resetPump()` 统一复位 `currentMenu = MAIN`，通用 `stop` 后不再残留 PRIME 状态
@@ -500,18 +542,30 @@ peristaltic_pump/
 
 ## 项目状态
 
-✅ **v2.5.0** (2026-08-15, StallGuard 堵转保护 + 自动断电 + 自检 + PIN)
+✅ **v2.5.1** (2026-08-24, WiFi 修复：SoftAP 不广播 / STA 永不重连 / mDNS 重注册)
 
 | 版本 | 分支 | 驱动 |
 |------|------|------|
-| **v2.5.0** | **`tmc2226`** | TMC2226 + CoolStep + StallGuard (活跃开发) |
+| **v2.5.1** | **`tmc2226`** | TMC2226 + CoolStep + StallGuard (活跃开发) |
+| v2.5.0 | `tmc2226` | TMC2226 + CoolStep + StallGuard |
 | v2.4.1 | `tmc2226` | TMC2226 + CoolStep + StealthChop |
 | v2.3.8 | `master` | DM542 + 6N137 光耦 (原始版本) |
 
-所有已知问题已解决：
+### ⚠️ 待解决
+
+| 问题 | 状态 | 说明 |
+|------|------|------|
+| **TMC2226 UART 通信失败** | ❌ **未解决** | 启动自检报 `[SETUP] tmc2226 COMM FAIL!`，芯片停留在上电默认态 —— 细分 / 电流 / StealthChop 全部未生效，**流量校准不准**。待排查：GPIO15 到 3.3V 的 4.7k~10k 上拉电阻是否实装（优先），或读响应数据字节序需由 MSB-first 改 LSB-first |
+| `restartWiFi()` 运行时重初始化留脏状态 | ⚠️ 可绕过 | Web UI 保存 WiFi 配置后本次运行状态不干净（两条 ERROR），冷启动正常。拟改为 `ESP.restart()` |
+
+### ✅ 已解决
 
 | 问题 | 状态 |
 |------|------|
+| SoftAP 完全搜不到 (`esp_wifi_restore` 抹掉 AP_STA) | ✅ v2.5.1 已移除该调用 |
+| `softAP()` 失败仍打印成功日志 (假绿) | ✅ v2.5.1 检查返回值 |
+| STA 掉线 / 超时后永不重连 | ✅ v2.5.1 三态机 + 60s 重试 |
+| `pump.local` 局域网侧解析不到 | ✅ v2.5.1 STA 就绪后重注册 mDNS |
 | TMC2226 CoolStep 自动调流 | ✅ 已启用 |
 | StealthChop 静音驱动 | ✅ 已启用 |
 | GPIO15 单线 UART 通信 | ✅ 9600bps 软件模拟 |

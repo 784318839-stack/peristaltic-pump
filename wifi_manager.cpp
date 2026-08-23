@@ -72,27 +72,42 @@ void initWiFi() {
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
-  // 4.5 清掉 NVS 里旧固件(老核心 persistent=true)保存的 WiFi 配置
-  //     storage=RAM 模式下不会重新写回, 一次性清理幽灵 AP 根源
-  esp_wifi_restore();
+  // 注意: 这里曾调用 esp_wifi_restore() 清 NVS 幽灵 AP。但该 API 会连带重置
+  // esp_wifi_set_mode() 的结果 (见 IDF 文档), 把上面刚设好的 AP_STA 抹回默认,
+  // 导致随后 softAP() 无 AP 接口可用而失败 —— 表现为日志一切正常但热点不广播。
+  // 幽灵 AP 已由 persistent(false) + softAPdisconnect(true) 解决, 故移除。
+  // 若仍有旧固件写入的 NVS 残留, 用 IDE 的 "Erase All Flash" 一次性清除。
 
   // 5. 配置 SoftAP (全功率 20dBm, 热管理已解决)
   WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);
-  WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 4);
-  Serial.printf("[WIFI] AP SSID: %s\n", apSSID.c_str());
+  bool apOk = WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 4);
+  if (apOk) {
+    Serial.printf("[WIFI] AP SSID: %s\n", apSSID.c_str());
+  } else {
+    // 不要静默失败: 之前丢弃返回值导致 AP 没建起来也照样打印 SSID
+    Serial.printf("[WIFI] softAP() FAILED! mode=%d\n", (int)WiFi.getMode());
+  }
   esp_wifi_set_max_tx_power(80);  // 20dBm 全功率
   esp_wifi_set_ps(WIFI_PS_NONE);  // 禁用 WiFi 省电模式, 避免唤醒延迟导致步进电机卡顿
   delay(300);
   localIP = WiFi.softAPIP();
+  Serial.printf("[WIFI] AP IP: %s  mode=%d  clients=%d\n",
+                localIP.toString().c_str(), (int)WiFi.getMode(),
+                WiFi.softAPgetStationNum());
 
   // 5. 如有 STA 配置，后台连接家里 WiFi
   if (hasConfig && wifiCfg.mode == WIFI_MODE_STA_FALLBACK && strlen(wifiCfg.ssid) > 0) {
+    Serial.printf("[WIFI] STA connecting to \"%s\" ...\n", wifiCfg.ssid);
     WiFi.begin(wifiCfg.ssid, wifiCfg.pass);
     staConnectStart = millis();
     staConnecting = true;
+  } else {
+    // 打印出来才能区分"没配置"和"配置读坏了"
+    Serial.printf("[WIFI] STA skipped (hasConfig=%d mode=%d ssid=\"%s\")\n",
+                  (int)hasConfig, (int)wifiCfg.mode, wifiCfg.ssid);
   }
 
-  // 6. 启动 mDNS
+  // 6. 启动 mDNS (仅覆盖 AP 接口; STA 拿到 IP 后由 wifiMaintain 重注册)
   if (MDNS.begin("pump")) {
     MDNS.addService("http", "tcp", 80);
   }
@@ -101,24 +116,69 @@ void initWiFi() {
 }
 
 // STA 连接维护 (loop 中调用)
-void wifiMaintain() {
-  if (!staConnecting) return;
+// 三态: 已连接(监控掉线) / 连接中(等结果) / 空闲(定期重试)
+static bool          staWasConnected = false;
+static unsigned long staLastRetry    = 0;
+#define STA_RETRY_MS   60000UL   // 失败/掉线后重试间隔
+#define STA_TIMEOUT_MS 30000UL   // 单次连接超时
 
+// STA 拿到 IP 后必须重注册 mDNS: initWiFi 里注册时 STA 尚无 IP,
+// pump.local 只绑到了 AP 网段, 局域网侧解析不到。
+static void restartMdns() {
+  MDNS.end();
+  if (MDNS.begin("pump")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("[WIFI] mDNS re-registered -> pump.local");
+  } else {
+    Serial.println("[WIFI] mDNS re-register FAILED");
+  }
+}
+
+void wifiMaintain() {
   wl_status_t status = WiFi.status();
 
-  if (status == WL_CONNECTED) {
-    // 连接成功, mDNS 已在 initWiFi 注册好, 无需重注册
-    staConnecting = false;
+  // --- 已连接: 只监控掉线 ---
+  if (staWasConnected) {
+    if (status != WL_CONNECTED) {
+      Serial.printf("[WIFI] STA lost (status=%d), will retry\n", (int)status);
+      staWasConnected = false;
+      staConnecting   = false;
+      staLastRetry    = millis();
+    }
     return;
   }
 
-  // 超时 (30 秒) 或连接失败 → 放弃本次 STA 尝试, SoftAP 仍在
-  if (millis() - staConnectStart > 30000 ||
-      status == WL_CONNECT_FAILED ||
-      status == WL_NO_SSID_AVAIL ||
-      status == WL_CONNECTION_LOST) {
-    staConnecting = false;
-    // 不 disconnnect — 让 WiFi stack 自己管理
+  // --- 连接中: 等结果 ---
+  if (staConnecting) {
+    if (status == WL_CONNECTED) {
+      staConnecting   = false;
+      staWasConnected = true;
+      Serial.printf("[WIFI] STA connected: IP=%s  RSSI=%d dBm  ch=%d\n",
+                    WiFi.localIP().toString().c_str(), WiFi.RSSI(), WiFi.channel());
+      restartMdns();
+      return;
+    }
+    if (millis() - staConnectStart > STA_TIMEOUT_MS ||
+        status == WL_CONNECT_FAILED ||
+        status == WL_NO_SSID_AVAIL ||
+        status == WL_CONNECTION_LOST) {
+      Serial.printf("[WIFI] STA connect failed (status=%d), retry in %lus\n",
+                    (int)status, STA_RETRY_MS / 1000);
+      staConnecting = false;
+      staLastRetry  = millis();
+      // 不 disconnect — 让 WiFi stack 自己管理
+    }
+    return;
+  }
+
+  // --- 空闲: 有配置就定期重试 (原实现在此永久放弃) ---
+  if (wifiCfg.mode == WIFI_MODE_STA_FALLBACK && strlen(wifiCfg.ssid) > 0 &&
+      millis() - staLastRetry > STA_RETRY_MS) {
+    Serial.printf("[WIFI] STA retry \"%s\" ...\n", wifiCfg.ssid);
+    WiFi.begin(wifiCfg.ssid, wifiCfg.pass);
+    staConnectStart = millis();
+    staConnecting   = true;
+    staLastRetry    = millis();
   }
 }
 
@@ -206,6 +266,8 @@ void restartWiFi() {
   WiFi.softAPdisconnect(true);
   WiFi.disconnect(true, true);
   delay(500);
-  staConnecting = false;
+  staConnecting   = false;
+  staWasConnected = false;
+  staLastRetry    = millis();
   initWiFi();
 }
