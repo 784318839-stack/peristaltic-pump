@@ -28,21 +28,23 @@ void setup() {
   delay(2000);
 
   setCpuFrequencyMhz(160);
-  Serial.printf("[SETUP] CPU: %d MHz\n", getCpuFrequencyMhz());
+  Serial.printf("[SETUP] CPU: %lu MHz\n", (unsigned long)getCpuFrequencyMhz());
   Serial.println("[SETUP] start");
 
   if (psramFound()) {
-    Serial.printf("[SETUP] PSRAM: %d KB (%.1f MB)\n", ESP.getPsramSize() / 1024, ESP.getPsramSize() / 1048576.0);
-    Serial.printf("[SETUP] Free PSRAM: %d KB\n", ESP.getFreePsram() / 1024);
+    Serial.printf("[SETUP] PSRAM: %lu KB (%.1f MB)\n", (unsigned long)(ESP.getPsramSize() / 1024), ESP.getPsramSize() / 1048576.0);
+    Serial.printf("[SETUP] Free PSRAM: %lu KB\n", (unsigned long)(ESP.getFreePsram() / 1024));
   }
-  Serial.printf("[SETUP] Free internal heap: %d KB\n", ESP.getFreeHeap() / 1024);
+  Serial.printf("[SETUP] Free internal heap: %lu KB\n", (unsigned long)(ESP.getFreeHeap() / 1024));
 
   initTelemetryBuffer();
   initResponseBuffer();
   initSerialBuffers();
 
   EEPROM.begin(512);
-  if (!loadParams()) saveParams();
+  // 首次上电必须显式 markDirty(): saveParams() 开头就有 if (!eepromDirty) return,
+  // 否则 magic 永远写不进去, 每次开机都走 loadParams 失败分支, 管路寿命累计也不持久化
+  if (!loadParams()) { markDirty(); saveParams(); }
   Serial.println("[SETUP] eeprom ok");
 
   pinMode(BUZZER_PIN, OUTPUT); digitalWrite(BUZZER_PIN, LOW);
@@ -52,12 +54,16 @@ void setup() {
 
   stepperEngine.init();
   stepper = stepperEngine.stepperConnectToPin(STEP_PIN);
-  if (stepper) {
-    stepper->setDirectionPin(DIR_PIN);
-    // ENA 始终使能: DM542 不支持运行时切使能, SW4 半流待机已够降温
-    digitalWrite(ENA_PIN, HIGH);
-    pump.stepperEnabled = true;
+  if (!stepper) {
+    // 拿不到步进对象整机就没有意义, 而后续所有 stepper-> 调用都会解引用空指针。
+    // 与其进入崩溃-重启循环, 不如停在这里给出明确诊断。
+    Serial.printf("[SETUP] FATAL: stepperConnectToPin(%d) failed\n", STEP_PIN);
+    for (;;) delay(1000);
   }
+  stepper->setDirectionPin(DIR_PIN);
+  // ENA 始终使能: DM542 不支持运行时切使能, SW4 半流待机已够降温
+  digitalWrite(ENA_PIN, HIGH);
+  pump.stepperEnabled = true;
   updateStepperSpeed();
   Serial.println("[SETUP] gpio ok");
 

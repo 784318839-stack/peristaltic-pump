@@ -11,11 +11,11 @@
 #include "buzzer.h"
 #include "pump_shared.h"
 
-#define MAX_SEQ 10  // 最多 5 段音 ( 每段 = freq + dur )
+#define MAX_SEGMENTS 5  // 最多 5 段音 ( 每段 = freq + dur )
 
 // 音序 : [ freq0, dur0, freq1, dur1, freq2, dur2, freq3, dur3, freq4, dur4 ]
-static int  g_seq[MAX_SEQ * 2];
-static int  g_seqLen = 0;    // 音序段数 ( 每段占 2 个 int )
+static int  g_seq[MAX_SEGMENTS * 2];
+static int  g_seqLen = 0;    // 音序段数
 static int  g_seqPos = 0;    // 当前播放到的段索引
 static unsigned long g_next = 0;
 
@@ -28,23 +28,28 @@ void buzzer_tick() {
     int freq = g_seq[g_seqPos * 2];
     int dur  = g_seq[g_seqPos * 2 + 1];
     if ( freq > 0 ) {
-      tone( BUZZER_PIN, freq, dur );   // ESP32 tone 带时长参数
+      // ESP32 core 3.x 的 tone() 是异步的: 只把 TONE_START 投进 _tone_queue,
+      // 由 toneTask 去 ledcWriteTone() + delay(dur) + 自动静音。
+      tone( BUZZER_PIN, freq, dur );
     } else {
       noTone( BUZZER_PIN );            // 静音间隔
     }
     g_next = millis() + dur;
     g_seqPos++;
+    return;   // 关键: 本 tick 到此为止, 不要顺手做收尾
   }
 
-  // 音序结束
-  if ( g_seqPos >= g_seqLen ) {
-    noTone( BUZZER_PIN );
-    g_seqLen = 0;
-  }
+  // 走到这里说明最后一段的时长已经走完, 现在才 noTone() 释放 LEDC 通道。
+  // 绝不能和最后那次 tone() 放在同一个 tick 里: noTone() 内部会先
+  // xQueueReset(_tone_queue) 清空待发队列, 刚投进去的 TONE_START 会被直接丢弃
+  // —— 表现就是「单段音效完全无声、多段音效最后一段被切掉」。
+  noTone( BUZZER_PIN );
+  g_seqLen = 0;
+  g_seqPos = 0;
 }
 
-// 启动音序 : 可变参数 ( freq, dur ) 对 , 以 freq=0 结尾
-// 实际用重载 : 最多 5 段
+// 启动音序 : ( freq, dur ) 对 , 用 dur=0 表示后续没有段
+// 注意: 新的 beep 会直接覆盖正在播放的音序, 不做排队
 static void startSeq( int f0, int d0, int f1, int d1, int f2, int d2,
                        int f3, int d3, int f4, int d4 ) {
   g_seq[0] = f0; g_seq[1] = d0;
@@ -55,7 +60,7 @@ static void startSeq( int f0, int d0, int f1, int d1, int f2, int d2,
 
   // 统计有效段数
   g_seqLen = 0;
-  for ( int i = 0; i < 5; i++ ) {
+  for ( int i = 0; i < MAX_SEGMENTS; i++ ) {
     if ( g_seq[i * 2 + 1] > 0 ) g_seqLen = i + 1;
   }
   if ( g_seqLen == 0 ) return;

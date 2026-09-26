@@ -24,7 +24,7 @@ struct WiFiConfig {
 
 // 初始化 WiFi (setup 中调用)
 // 直接从 WIFI_AP_STA 双模启动, SoftAP 始终可用
-// 如有已保存的 STA 配置, 后台连接家里 WiFi
+// 如有已保存的 STA 配置, 后台连接家里 WiFi (esp_wifi 自带自动重连)
 void initWiFi();
 
 // 获取当前 WiFi 状态 (用于遥测)
@@ -36,10 +36,12 @@ bool loadWiFiConfig(WiFiConfig& cfg);
 void saveWiFiConfig(const WiFiConfig& cfg);
 
 // 重启 WiFi (应用新配置后调用)
+// 注意: 会拆掉当前 SoftAP, 调用方必须先把 HTTP 响应发完再调
 void restartWiFi();
 
 // 默认 SoftAP 配置
 #define WIFI_AP_SSID_PREFIX "PumpCtrl-"
+#define WIFI_AP_PASSWORD    "12345678"
 #define WIFI_AP_IP          IPAddress(192, 168, 4, 1)
 #define WIFI_AP_GATEWAY     IPAddress(192, 168, 4, 1)
 #define WIFI_AP_SUBNET      IPAddress(255, 255, 255, 0)

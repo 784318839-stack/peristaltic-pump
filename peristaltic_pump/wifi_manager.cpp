@@ -3,9 +3,10 @@
  *
  * 启动策略:
  *   1. 直接从 WIFI_AP_STA 双模启动 (避免模式切换导致 LWIP 锁冲突)
- *   2. SoftAP 始终可用: PumpCtrl-XXXX, IP 192.168.4.1, 密码 12345678
+ *   2. SoftAP 始终可用: PumpCtrl-XXXX, IP 192.168.4.1, 密码见 WIFI_AP_PASSWORD
  *   3. 如有已保存的 STA 配置, 后台尝试连接家里 WiFi (不阻塞)
- *   4. STA 连接成功后可通过路由器分配的 IP 访问 (看 /api/info)
+ *      断线重连由 esp_wifi 自身负责, 固件不轮询维护
+ *   4. STA 连接成功后可通过路由器分配的 IP 访问 (见遥测的 wifiMode / wifiIP 字段)
  *   5. 支持 mDNS: pump.local  (同时绑定两个接口)
  ******************************************************************************/
 #include "wifi_manager.h"
@@ -66,19 +67,23 @@ void initWiFi() {
 
   // 5. 配置 SoftAP (全功率 20dBm, 热管理已解决)
   WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);
-  WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 2);
+  WiFi.softAP(apSSID.c_str(), WIFI_AP_PASSWORD, 1, 0, 2);
   Serial.printf("[WIFI] AP SSID: %s\n", apSSID.c_str());
   esp_wifi_set_max_tx_power(80);  // 20dBm 全功率
   esp_wifi_set_ps(WIFI_PS_NONE);  // 禁用 WiFi 省电模式, 避免唤醒延迟导致步进电机卡顿
   delay(300);
   localIP = WiFi.softAPIP();
 
-  // 5. 如有 STA 配置，后台连接家里 WiFi
+  // 6. 如有 STA 配置, 后台连接家里 WiFi
+  //    esp_wifi 自带自动重连, 连接失败也不影响 SoftAP, 无需在 loop 里轮询维护
   if (hasConfig && wifiCfg.mode == WIFI_MODE_STA_FALLBACK && strlen(wifiCfg.ssid) > 0) {
     WiFi.begin(wifiCfg.ssid, wifiCfg.pass);
   }
 
-  // 6. 启动 mDNS
+  // 7. 启动 mDNS
+  //    restartWiFi() 会重入本函数, 必须先 end() —— 否则 MDNS.begin() 报
+  //    "Service already exists" 返回 false, addService 不执行, pump.local 失效
+  MDNS.end();
   if (MDNS.begin("pump")) {
     MDNS.addService("http", "tcp", 80);
   }

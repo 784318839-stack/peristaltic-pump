@@ -29,10 +29,14 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define BUZZER_PIN 5
 #define HW_UART_RX 21
 #define HW_UART_TX 47
+#define LED_PIN    48   // WS2812 状态灯 (单颗)
 #define EEPROM_MAGIC  0x5061  // v4.2: 400 pulse/rev 细分 (revert from 1600)
 #define EEPROM_ADDR   0
 #define ACCEL_FACTOR  0.3f
 #define COMPLETIONS_PER_SAVE 10
+// DONE 状态的保持时长。pump_machine 用它决定何时回 IDLE, led 用它算渐暗时长 ——
+// 两处必须同源, 否则 LED 动画会按错误的时长走 (原先 led 按 3s 算而实际只有 2s)。
+#define DONE_HOLD_MS  2000
 
 constexpr const char* LIQUID_NAMES[NUM_LIQUIDS] = { "Wtr", "Thk", "Liq1", "Liq2" };
 

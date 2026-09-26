@@ -10,6 +10,9 @@ struct PumpState {
   CalibStep calibStep     = CALIB_IDLE;
   float stepsPerMl       = 250.0;
   float flowRate         = 50.0;
+  // 本次运行实际使用的流量。TIME 模式下由 体积/时间 反算得到, 不能覆写 flowRate
+  // (那是用户设定值, 覆写会让 UI 显示一个用户没设过的数, 重启后又变回去)
+  float activeFlowRate   = 50.0;
   float targetVolume     = 10.0;
   float dispensedVolume  = 0;
   float targetTime       = 30.0;

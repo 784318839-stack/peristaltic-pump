@@ -1,13 +1,13 @@
 ﻿/******************************************************************************
- * web_handlers.cpp - HTTP 鏈嶅姟瀹炵幇 (WiFiServer, 鏃?AsyncTCP 渚濊禆)
+ * web_handlers.cpp - HTTP 服务实现 (WiFiServer, 无 AsyncTCP 依赖)
  *
- * 璺敱:
- *   GET  /              -> Web UI
- *   GET  /api/status    -> JSON 閬ユ祴
- *   GET  /api/cmd?c=xxx -> 鍛戒护
- *   POST /api/wifi      -> 淇濆瓨 WiFi 閰嶇疆 (JSON body)
- *   GET  /api/scan      -> 鎵弿闄勮繎 WiFi
- *   GET  /api/info      -> 缃戠粶淇℃伅 (IP / 妯″紡 / MAC)
+ * 路由:
+ *   GET  /              -> Web UI (内嵌 web_ui_gen.h)
+ *   GET  /manifest.json -> PWA 清单
+ *   GET  /api/status    -> JSON 遥测
+ *   GET  /api/cmd?c=xxx -> 命令
+ *   POST /api/wifi      -> 保存 WiFi 配置 (JSON body)
+ *   GET  /api/scan      -> 扫描附近 WiFi (同步, ~8s, 结果缓存 15s)
  ******************************************************************************/
 #include "web_handlers.h"
 #include "command_protocol.h"
@@ -19,52 +19,92 @@
 #include <ArduinoJson.h>
 
 // ============================================================================
-//                            HTTP 鏈嶅姟鍣?
+//                            HTTP 服务器
 // ============================================================================
 static WiFiServer server(80);
 
-// 鍐呭祵 Web UI
+// 内嵌 Web UI
 #include "web_ui_gen.h"
 
+// 单个请求的最大字节数 (headers + body)。POST /api/wifi 的 body 只有 ~150B,
+// headers ~400B, 2KB 绰绰有余。
+#define REQ_BUF_SIZE 2048
+
 // ============================================================================
-//                            杈呭姪鍑芥暟
+//                            辅助函数
 // ============================================================================
 
+// RFC 7230 里理由短语只是给人看的, 但发 "HTTP/1.1 404 OK" 会让人误判。
+static const char* reasonPhrase(int code) {
+  switch (code) {
+    case 400: return "Bad Request";
+    case 404: return "Not Found";
+    case 500: return "Internal Server Error";
+    default:  return "OK";
+  }
+}
+
+// 必须带 Content-Length: 否则浏览器只能靠连接关闭判断 body 结束, 一旦 stop()
+// 早于 lwIP 真正把数据发出去, 24.5KB 的 WEB_UI 就会被截断。
+static void sendResponse(WiFiClient &client, int code, const char* contentType, const char* body) {
+  size_t len = strlen(body);
+  char head[160];
+  snprintf(head, sizeof(head),
+           "HTTP/1.1 %d %s\r\n"
+           "Content-Type: %s\r\n"
+           "Content-Length: %u\r\n"
+           "Connection: close\r\n\r\n",
+           code, reasonPhrase(code), contentType, (unsigned)len);
+  client.print(head);
+  client.write((const uint8_t*)body, len);
+}
+
 static void sendJson(WiFiClient &client, int code, const char* json) {
-  client.print("HTTP/1.1 ");
-  client.print(code);
-  client.print(" OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n");
-  client.print(json);
+  sendResponse(client, code, "application/json", json);
 }
 
 static void sendHtml(WiFiClient &client, int code, const char* html) {
-  client.print("HTTP/1.1 ");
-  client.print(code);
-  client.print(" OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n");
-  client.print(html);
+  sendResponse(client, code, "text/html; charset=utf-8", html);
 }
 
-static String getQueryParam(const String &url, const char* key) {
+// 只认 '?' 之后、以 '&' 分隔的 key= 片段。
+// 原实现直接 url.indexOf("c="), 于是 /api/cmd?xc=start 也会命中。
+static String getQueryParam(const char* url, const char* key) {
+  const char* q = strchr(url, '?');
+  if (!q) return "";
+  String query(q + 1);
+  int sp = query.indexOf(' ');            // 去掉 " HTTP/1.1" 尾巴
+  if (sp >= 0) query = query.substring(0, sp);
+
   String k = String(key) + "=";
-  int start = url.indexOf(k);
-  if (start < 0) return "";
-  start += k.length();
-  int end = url.indexOf('&', start);
-  if (end < 0) end = url.indexOf(' ', start);
-  if (end < 0) end = url.length();
-  return url.substring(start, end);
+  int pos = 0;
+  while (pos < (int)query.length()) {
+    int amp = query.indexOf('&', pos);
+    String pair = (amp < 0) ? query.substring(pos) : query.substring(pos, amp);
+    if (pair.startsWith(k)) return pair.substring(k.length());
+    if (amp < 0) break;
+    pos = amp + 1;
+  }
+  return "";
 }
 
-// 浠?headers 涓彁鍙?Content-Length
-static int getContentLength(const String &headers) {
-  int idx = headers.indexOf("Content-Length:");
-  if (idx < 0) idx = headers.indexOf("content-length:");
-  if (idx < 0) return 0;
-  idx += 15;
-  int end = headers.indexOf('\r', idx);
-  if (end < 0) end = headers.indexOf('\n', idx);
-  if (end < 0) end = headers.length();
-  return headers.substring(idx, end).toInt();
+// 从 headers 中提取 Content-Length
+static int getContentLength(const char* headers) {
+  const char* p = strstr(headers, "Content-Length:");
+  if (!p) p = strstr(headers, "content-length:");
+  if (!p) return 0;
+  return atoi(p + 15);
+}
+
+// 返回 body 的起始偏移, 找不到返回 -1。
+// 必须同时正确处理 \r\n\r\n (4 字节) 和 \n\n (2 字节) —— 原实现两种都接受,
+// 但之后一律按 4 字节算, LF-only 客户端的 body 会被吃掉前 2 个字节导致 JSON 解析失败。
+static int findHeaderEnd(const char* s) {
+  const char* p = strstr(s, "\r\n\r\n");
+  if (p) return (int)(p - s) + 4;
+  p = strstr(s, "\n\n");
+  if (p) return (int)(p - s) + 2;
+  return -1;
 }
 
 // ============================================================================
@@ -72,7 +112,7 @@ static int getContentLength(const String &headers) {
 //
 //  改用同步扫描: ESP32 Arduino 异步扫描在 AP+STA 模式下 _scanStatus
 //  状态机有 bug, scanDelete() 后 scanNetworks() 仍返回 -1。
-//  同步扫描阻塞约 8 秒但可靠, 泵控使用 RMT 硬件脉冲不受影响。
+//  同步扫描阻塞约 8 秒但可靠; 泵控由 MCPWM+PCNT 硬件发脉冲, 不受 loop 阻塞影响。
 //  结果缓存 15 秒, 防止前端 300ms 轮询积累的排队请求重复扫描。
 // ============================================================================
 
@@ -106,39 +146,42 @@ static String buildScanResultJson(int n) {
 }
 
 // ============================================================================
-//                            璇锋眰璺敱
+//                            请求路由
 // ============================================================================
 
-static void handleRequest(WiFiClient &client, const String &method,
-                          const String &path, const String &body) {
-  // GET / 鎴?/index.html -> Web UI
-  if (method == "GET" && (path == "/" || path.startsWith("/index.html"))) {
+static void handleRequest(WiFiClient &client, const char* method,
+                          const char* path, const char* body) {
+  bool isGet  = (strcmp(method, "GET") == 0);
+  bool isPost = (strcmp(method, "POST") == 0);
+
+  // GET / 或 /index.html -> Web UI
+  if (isGet && (strcmp(path, "/") == 0 || strncmp(path, "/index.html", 11) == 0)) {
     sendHtml(client, 200, WEB_UI);
     return;
   }
 
   // GET /manifest.json
-  if (method == "GET" && path.startsWith("/manifest.json")) {
+  if (isGet && strncmp(path, "/manifest.json", 14) == 0) {
     sendJson(client, 200,
-      "{\"name\":\"锠曞姩娉垫帶鍒跺櫒\",\"short_name\":\"PumpCtrl\","
+      "{\"name\":\"蠕动泵控制器\",\"short_name\":\"PumpCtrl\","
       "\"start_url\":\"/\",\"display\":\"standalone\","
       "\"background_color\":\"#0d1117\",\"theme_color\":\"#0d1117\"}");
     return;
   }
 
-  // GET /api/status -> 閬ユ祴
-  if (method == "GET" && path.startsWith("/api/status")) {
+  // GET /api/status -> 遥测
+  if (isGet && strncmp(path, "/api/status", 11) == 0) {
     sendJson(client, 200, buildTelemetryJson());
     return;
   }
 
-  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii -> 鍛戒护
-  if (method == "GET" && path.startsWith("/api/cmd")) {
-    String cmd = getQueryParam(path, "c");
-    String val = getQueryParam(path, "v");
+  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii -> 命令
+  if (isGet && strncmp(path, "/api/cmd", 8) == 0) {
+    String cmd  = getQueryParam(path, "c");
+    String val  = getQueryParam(path, "v");
     String slot = getQueryParam(path, "s");
     String mode = getQueryParam(path, "m");
-    String idx = getQueryParam(path, "i");
+    String idx  = getQueryParam(path, "i");
 
     if (cmd.length() == 0) {
       sendJson(client, 400, "{\"ok\":false,\"error\":\"Missing cmd\"}");
@@ -172,8 +215,8 @@ static void handleRequest(WiFiClient &client, const String &method,
     return;
   }
 
-  // POST /api/wifi -> 淇濆瓨 WiFi 閰嶇疆
-  if (method == "POST" && path.startsWith("/api/wifi")) {
+  // POST /api/wifi -> 保存 WiFi 配置
+  if (isPost && strncmp(path, "/api/wifi", 9) == 0) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, body);
     if (err) {
@@ -195,16 +238,24 @@ static void handleRequest(WiFiClient &client, const String &method,
     cfg.mode = (mode != 0) ? WIFI_MODE_STA_FALLBACK : WIFI_MODE_AP_ONLY;
 
     saveWiFiConfig(cfg);
-    restartWiFi();
 
+    // 必须先把响应完整发出去并优雅关闭连接, 再重启 WiFi。
+    // restartWiFi() 会 softAPdisconnect(true), 直接拆掉承载这条响应的 TCP 连接;
+    // 连接被硬拆就会让前端 fetch() reject, 保存成功也显示成失败。
     sendJson(client, 200, "{\"ok\":true,\"saved\":true}");
+    client.flush();
+    client.stop();
+    delay(300);
+
+    restartWiFi();
     return;
   }
 
-  // GET /api/scan -> WiFi sync scan (blocking ~8s, reliable)
-  // Cached: subsequent requests within 15s get cached results instantly
-  if (method == "GET" && path.startsWith("/api/scan")) {
-    if (pump.state == RUNNING || pump.state == PAUSED) {
+  // GET /api/scan -> WiFi 同步扫描 (阻塞 ~8s, 结果缓存 15s)
+  if (isGet && strncmp(path, "/api/scan", 9) == 0) {
+    // ANTI_DRIP 也要挡: 此时电机正在反转回吸, 而扫描会把 loop() 冻住约 8 秒,
+    // pump_machine_tick() 停摆 -> 回吸结束后状态卡在 ANTI_DRIP。
+    if (pump.state == RUNNING || pump.state == PAUSED || pump.state == ANTI_DRIP) {
       sendJson(client, 200, "{\"ok\":false,\"error\":\"Pump busy\",\"done\":true,\"networks\":[]}");
       return;
     }
@@ -266,7 +317,7 @@ static void handleRequest(WiFiClient &client, const String &method,
       if (apSSID.length() > 0) {
         WiFi.softAPdisconnect(true);  // ensure clean state
         delay(30);
-        WiFi.softAP(apSSID.c_str(), "12345678", 1, 0, 2);
+        WiFi.softAP(apSSID.c_str(), WIFI_AP_PASSWORD, 1, 0, 2);
         delay(200);
         esp_wifi_set_max_tx_power(80);
         esp_wifi_set_ps(WIFI_PS_NONE);
@@ -285,13 +336,11 @@ static void handleRequest(WiFiClient &client, const String &method,
       String json = "{\"ok\":true,\"done\":true,";
       json += buildScanResultJson(n).substring(1);
       scanResultJson = json;
-      scanResultReady = true;
-      scanResultTime = millis();
     } else {
       scanResultJson = "{\"ok\":true,\"done\":true,\"networks\":[]}";
-      scanResultReady = true;
-      scanResultTime = millis();
     }
+    scanResultReady = true;
+    scanResultTime = millis();
 
     sendJson(client, 200, scanResultJson.c_str());
 
@@ -305,7 +354,7 @@ static void handleRequest(WiFiClient &client, const String &method,
 }
 
 // ============================================================================
-//                            瀹㈡埛绔鐞?
+//                            客户端处理
 // ============================================================================
 
 void initWebServer() {
@@ -316,52 +365,59 @@ void handleWebClients() {
   WiFiClient client = server.accept();
   if (!client) return;
 
-  // 璇诲彇 HTTP 璇锋眰 (headers + body)
-  unsigned long timeout = millis() + 200;
-  String request;
+  // 用固定缓冲成块读, 不要逐字节 String += —— Arduino String::concat 每次精确
+  // 重分配, 一个 500 字节的请求就是 500 次 malloc/free, 长期运行会加剧堆碎片。
+  static char buf[REQ_BUF_SIZE];
+  int len = 0;
+  int headerEnd = -1;
   int contentLength = 0;
-  bool headersDone = false;
+  unsigned long deadline = millis() + 200;
 
-  while (client.connected() && millis() < timeout) {
-    if (client.available()) {
-      char c = client.read();
-      request += c;
-      timeout = millis() + 200;  // 姣忔璇诲彇閲嶇疆瓒呮椂
+  buf[0] = '\0';
+  while (client.connected() && millis() < deadline && len < REQ_BUF_SIZE - 2) {
+    int avail = client.available();
+    if (avail <= 0) { delay(1); continue; }
 
-      if (!headersDone) {
-        if (request.endsWith("\r\n\r\n") || request.endsWith("\n\n")) {
-          headersDone = true;
-          contentLength = getContentLength(request);
-          if (contentLength <= 0) break;  // 鏃?body锛岀粨鏉?
-        }
-      } else {
-        // 璁＄畻宸茶鍙栫殑 body 瀛楄妭鏁?
-        int headerEnd = request.indexOf("\r\n\r\n");
-        if (headerEnd < 0) headerEnd = request.indexOf("\n\n");
-        int bodyRead = request.length() - headerEnd - 4;
-        if (bodyRead >= contentLength) break;  // body 璇诲彇瀹屾瘯
+    int room = REQ_BUF_SIZE - 2 - len;
+    int n = client.read((uint8_t*)buf + len, (uint16_t)(avail < room ? avail : room));
+    if (n <= 0) break;
+    len += n;
+    buf[len] = '\0';
+    deadline = millis() + 200;            // 每次读到数据就重置超时
+
+    if (headerEnd < 0) {
+      headerEnd = findHeaderEnd(buf);
+      if (headerEnd >= 0) {
+        contentLength = getContentLength(buf);
+        if (contentLength <= 0) break;    // 无 body, 结束
       }
+    } else if (len - headerEnd >= contentLength) {
+      break;                              // body 读完了
     }
   }
 
-  // 瑙ｆ瀽鏂规硶 & 璺緞
-  int firstSpace = request.indexOf(' ');
-  int secondSpace = request.indexOf(' ', firstSpace + 1);
-  if (firstSpace < 0 || secondSpace < 0) { client.stop(); return; }
+  if (len == 0) { client.stop(); return; }
 
-  String method = request.substring(0, firstSpace);
-  String path = request.substring(firstSpace + 1, secondSpace);
+  // 解析请求行: METHOD SP PATH SP VERSION
+  char* firstSpace = strchr(buf, ' ');
+  if (!firstSpace) { client.stop(); return; }
+  *firstSpace = '\0';
+  const char* method = buf;
+  char* path = firstSpace + 1;
+  char* secondSpace = strchr(path, ' ');
+  if (!secondSpace) { client.stop(); return; }
+  *secondSpace = '\0';
 
-  // 鎻愬彇 body
-  String body;
-  if (contentLength > 0) {
-    int headerEnd = request.indexOf("\r\n\r\n");
-    if (headerEnd < 0) headerEnd = request.indexOf("\n\n");
-    if (headerEnd >= 0) {
-      body = request.substring(headerEnd + 4, headerEnd + 4 + contentLength);
-    }
+  // body 按 Content-Length 截断并就地补 NUL, 避免把管线化的后续请求当成本次 body
+  const char* body = "";
+  if (headerEnd >= 0 && contentLength > 0) {
+    int bodyEnd = headerEnd + contentLength;
+    if (bodyEnd > len) bodyEnd = len;
+    buf[bodyEnd] = '\0';
+    body = buf + headerEnd;
   }
 
   handleRequest(client, method, path, body);
+  client.flush();                         // 确保数据真的发出去再关, 否则大响应会被截断
   client.stop();
 }

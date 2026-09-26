@@ -68,8 +68,8 @@ static void tick_running() {
   if (!stepper->isRunning()) {
     pump.dispensedVolume = pump.targetVolume;
     if (pump.antiDripVol > 0) {
-      stepper->setSpeedInHz((uint32_t)(flowRateToPPS(pump.flowRate) * 0.3));
-      stepper->setAcceleration((int)flowRateToPPS(pump.flowRate));
+      float pps = flowRateToPPS(pump.activeFlowRate);
+      applySpeed(pps * 0.3f, pps);
       stepper->setCurrentPosition(0);
       stepper->moveTo(-(int32_t)(pump.antiDripVol * pump.stepsPerMl));
       pump_machine_transition(ANTI_DRIP);
@@ -93,5 +93,5 @@ static void tick_anti_drip() {
 }
 
 static void tick_done() {
-  if (millis() - done_entry_ms > 2000) pump_machine_transition(STATE_IDLE);
+  if (millis() - done_entry_ms > DONE_HOLD_MS) pump_machine_transition(STATE_IDLE);
 }

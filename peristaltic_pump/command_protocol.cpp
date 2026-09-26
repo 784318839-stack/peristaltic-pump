@@ -1,10 +1,9 @@
 ﻿/******************************************************************************
- * command_protocol.cpp 鈥?杩滅▼鍛戒护鍗忚瀹炵幇
+ * command_protocol.cpp — 远程命令协议实现
  *
- * 绾跨▼瀹夊叏璁捐 :
- *   - Web / BLE / 涓插彛鍥炶皟 : 鍙皟鐢?enqueueCommand() 鍏ラ槦
- *   - loop()            : 璋冪敤 processCommandQueue() 鍑洪槦骞舵墽琛?
- *   - 鎵€鏈夌姸鎬佽鍐欓兘鍦?loop() 绾跨▼涓婁覆琛屽寲 , 鏃犻渶浜掓枼閿?
+ * 线程模型 :
+ *   - HTTP / USB 串口 / 硬件 UART 都在 loop() 上下文里直接调用 parseAndExecute()
+ *   - 所有泵状态读写都发生在 loop() 单线程内 , 串行执行 , 无需互斥锁
  ******************************************************************************/
 #include "command_protocol.h"
 #include "pump_shared.h"
@@ -14,10 +13,10 @@
 #include <esp_heap_caps.h>
 
 // ============================================================================
-//                            JSON 瑙ｆ瀽 & 鍛戒护璺敱
+//                            JSON 解析 & 命令路由
 // ============================================================================
 
-// PSRAM 鍝嶅簲缂撳啿鍖?
+// PSRAM 响应缓冲区
 static char* responseBuf = nullptr;
 #define RESPONSE_BUF_SIZE 1536
 
@@ -27,7 +26,7 @@ void initResponseBuffer() {
   if (responseBuf) responseBuf[0] = '\0';
 }
 
-// 鏋勯€犳垚鍔熷搷搴?
+// 构造成功响应
 static const char* okResponse( const char* cmd, const char* dataJson = nullptr ) {
   if ( dataJson ) {
     snprintf( responseBuf, RESPONSE_BUF_SIZE,
@@ -39,7 +38,7 @@ static const char* okResponse( const char* cmd, const char* dataJson = nullptr )
   return responseBuf;
 }
 
-// 鏋勯€犻敊璇搷搴?
+// 构造错误响应
 static const char* errResponse( const char* cmd, const char* error ) {
   snprintf( responseBuf, RESPONSE_BUF_SIZE,
             "{\"type\":\"response\",\"id\":\"%s\",\"ok\":false,\"error\":\"%s\"}", cmd, error );
@@ -47,7 +46,7 @@ static const char* errResponse( const char* cmd, const char* error ) {
 }
 
 const char* parseAndExecute( const char* json ) {
-  JsonDocument doc;  // ArduinoJson v7 榛樿鏍堝垎閰?
+  JsonDocument doc;  // ArduinoJson v7 默认栈分配
 
   DeserializationError err = deserializeJson( doc, json );
   if ( err ) {
@@ -65,7 +64,7 @@ const char* parseAndExecute( const char* json ) {
   JsonObject params = doc["params"];
 
   // ===================================================================
-  //  杩愯鎺у埗鍛戒护
+  //  运行控制命令
   // ===================================================================
 
   if ( strcmp( cmd, "start" ) == 0 ) {
@@ -96,7 +95,7 @@ const char* parseAndExecute( const char* json ) {
   }
 
   // ===================================================================
-  //  妯″紡 & 娑蹭綋閫夋嫨
+  //  模式 & 液体选择
   // ===================================================================
 
   if ( strcmp( cmd, "set_mode" ) == 0 ) {
@@ -130,7 +129,7 @@ const char* parseAndExecute( const char* json ) {
   }
 
   // ===================================================================
-  //  鍙傛暟璁剧疆
+  //  参数设置
   // ===================================================================
 
   if ( strcmp( cmd, "set_flow" ) == 0 ) {
@@ -168,7 +167,7 @@ const char* parseAndExecute( const char* json ) {
   }
 
   // ===================================================================
-  //  鍠峰皠妯″紡鍙傛暟
+  //  喷射模式参数
   // ===================================================================
 
   if ( strcmp( cmd, "set_jet_vol" ) == 0 ) {
@@ -225,7 +224,7 @@ const char* parseAndExecute( const char* json ) {
   }
 
   // ===================================================================
-  //  鏍″噯鍚戝 ( 6 姝ヨ繙绋嬪懡浠?)
+  //  校准向导 ( 远程命令 )
   // ===================================================================
 
   if ( strcmp( cmd, "calib_enter" ) == 0 ) {
@@ -282,7 +281,10 @@ const char* parseAndExecute( const char* json ) {
     if ( isnan( val ) || val <= 0 || val > 99999 )
       return errResponse( cmd, "Measured volume out of range" );
     pump.calibActualVol = val;
-    calibCalculate();
+    // 算不出有效值时必须报错并停在 MEASURE 步, 否则 calibNewSPM 保持 0 却照样
+    // 进入 RESULT, calib_save 会把 stepsPerMl=0 写进 EEPROM
+    if ( !calibCalculate() )
+      return errResponse( cmd, "No steps recorded - did the motor run?" );
     pump.calibStep = CALIB_RESULT;
     beepConfirm();
     char data[128];
@@ -293,6 +295,8 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "calib_save" ) == 0 ) {
     if ( pump.currentMenu != CALIBRATE || pump.calibStep != CALIB_RESULT )
       return errResponse( cmd, "Not at calib result step" );
+    if ( !( pump.calibNewSPM >= 10.0f ) )
+      return errResponse( cmd, "Invalid stepsPerMl, please recalibrate" );
     calibSave();
     pump.calibStep = CALIB_SETTINGS;
     beepDone();
@@ -318,7 +322,7 @@ const char* parseAndExecute( const char* json ) {
   }
 
   // ===================================================================
-  //  楂樼骇璁剧疆
+  //  高级设置
   // ===================================================================
 
   if ( strcmp( cmd, "set_anti_drip" ) == 0 ) {
@@ -342,17 +346,16 @@ const char* parseAndExecute( const char* json ) {
   }
 
   // ===================================================================
-  //  棰勭亴 / 蹇帓
+  //  预灌 / 快排
   // ===================================================================
 
   if ( strcmp( cmd, "prime_start" ) == 0 ) {
     if ( pump.state != STATE_IDLE ) return errResponse( cmd, "Pump not idle" );
     pump.currentMenu = PRIME;
     ensureStepperOn();
-    stepper->setSpeedInHz( ( uint32_t )flowRateToPPS( 1500.0 ) );
-    stepper->setAcceleration( ( int )flowRateToPPS( 1500.0 ) );
+    applySpeed( flowRateToPPS( 1500.0 ), flowRateToPPS( 1500.0 ) );
     stepper->setCurrentPosition( 0 );
-    stepper->moveTo( 999999999 );  /* 杩滆秴瀹為檯, RMT 纭欢鎸佺画杩愯鐩村埌 forceStop */
+    stepper->moveTo( 999999999 );  /* 远超实际需要, MCPWM 硬件持续发脉冲直到 forceStop */
     pump.dispensedVolume = 0;
     pump.state = RUNNING;
     beepStart();
@@ -369,7 +372,7 @@ const char* parseAndExecute( const char* json ) {
 
 
   // ===================================================================
-  //  鑿滃崟 & 鏌ヨ
+  //  菜单 & 查询
   // ===================================================================
 
   if ( strcmp( cmd, "menu_main" ) == 0 ) {
@@ -396,20 +399,20 @@ const char* parseAndExecute( const char* json ) {
 }
 
 // ============================================================================
-//                                閬ユ祴
+//                                遥测
 // ============================================================================
 
 static char* telemetryBuf = nullptr;
 #define TELEMETRY_BUF_SIZE 1024
 
-// PSRAM 鐘舵€?(姣忔閬ユ祴鍒锋柊)
+// PSRAM 状态 (每次遥测刷新)
 static size_t psramFree = 0, psramTotal = 0;
 
 void initTelemetryBuffer() {
-  // 浼樺厛鍒嗛厤鍒?PSRAM
+  // 优先分配到 PSRAM
   telemetryBuf = (char*)heap_caps_malloc(TELEMETRY_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!telemetryBuf) {
-    telemetryBuf = (char*)malloc(TELEMETRY_BUF_SIZE);  // 鍥為€€鍒板唴閮?RAM
+    telemetryBuf = (char*)malloc(TELEMETRY_BUF_SIZE);  // 回退到内部 RAM
   }
   if (telemetryBuf) telemetryBuf[0] = '\0';
 }
@@ -417,13 +420,13 @@ void initTelemetryBuffer() {
 const char* buildTelemetryJson() {
   if (!telemetryBuf) return "{}";
 
-  // 鍒锋柊 PSRAM 缁熻
+  // 刷新 PSRAM 统计
   psramTotal = ESP.getPsramSize();
   psramFree  = ESP.getFreePsram();
 
-  // 鍐呴儴 RAM 缁熻
+  // 内部 RAM 统计
   size_t heapFree = ESP.getFreeHeap();
-  size_t heapTotal = 327680;  // ESP32-S3 鍐呴儴 DRAM 鎬婚噺
+  size_t heapTotal = ESP.getHeapSize();  // 实测值 (原先硬编码 327680 是假数据)
   const char* modeStr = ( pump.mode == MODE_TIME ) ? "TIME"
                       : ( pump.mode == MODE_JET )  ? "JET" : "VOLUME";
 
@@ -443,22 +446,22 @@ const char* buildTelemetryJson() {
     default: break;
   }
 
-  // 杩涘害鐧惧垎姣?
+  // 进度百分比
   int progress = 0;
   if ( ( pump.state == RUNNING || pump.state == PAUSED || pump.state == DONE ) && pump.targetVolume > 0 ) {
     progress = ( int )( pump.dispensedVolume / pump.targetVolume * 100 );
     if ( progress > 100 ) progress = 100;
   }
 
-  // 宸茶繍琛岀鏁?
+  // 已运行秒数
   unsigned long elapsed = 0;
   if ( pump.state == RUNNING )
     elapsed = ( millis() - pump.pumpStartMs ) / 1000;
 
-  // 绠¤矾瀵垮懡鐧惧垎姣?
+  // 管路寿命百分比
   int tubePct = ( pump.tubeLifeML > 0 ) ? ( int )( pump.totalDispensed / pump.tubeLifeML * 100 ) : 0;
 
-  // WiFi 鐘舵€?
+  // WiFi 状态
   const char* wifiMode = nullptr;
   const char* wifiIP = nullptr;
   int wifiClients = 0;

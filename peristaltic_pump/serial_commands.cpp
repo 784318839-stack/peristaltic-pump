@@ -2,7 +2,7 @@
  * serial_commands.cpp — USB CDC & 硬件 UART 串口命令实现
  *
  * 帧格式 : 换行分隔的 JSON ( 兼容 \n , \r\n )
- * 最大单帧 : 512 字节
+ * 最大单帧 : 1024 字节 (SERIAL_BUF_SIZE)
  *
  * 缓冲区分配在 PSRAM 中, 减少内部 SRAM 占用
  ******************************************************************************/
@@ -63,6 +63,10 @@ void processSerialCommands() {
 static HardwareSerial hwUart( 1 );
 
 void initHardwareUart() {
+  // 必须在 begin() 之前调用。默认 RX 环形缓冲只有 256 字节, 而单帧上限是
+  // SERIAL_BUF_SIZE; 115200 下 256B 只有约 22ms 余量, 而 parseAndExecute()
+  // (JSON 解析 + 生成响应) 可能更久 -> 长命令帧会被截断。
+  hwUart.setRxBufferSize( SERIAL_BUF_SIZE );
   hwUart.begin( 115200, SERIAL_8N1, HW_UART_RX, HW_UART_TX );
   unsigned long start = millis();
   while ( !hwUart && millis() - start < 1000 ) { delay( 5 ); }

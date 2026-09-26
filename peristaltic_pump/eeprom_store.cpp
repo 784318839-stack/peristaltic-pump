@@ -9,6 +9,14 @@
 
 void markDirty() { pump.eepromDirty = true; }
 
+// constrain() 是宏 ((amt)<(low)?(low):((amt)>(high)?(high):(amt))), 两个比较对 NaN
+// 都为假 → 原样返回 NaN。而 EEPROM 半写 (magic 有效但某个 float 还是擦除态
+// 0xFFFFFFFF) 恰好就是 NaN, 之后 (int32_t)NaN 是未定义行为。所以先过 isfinite,
+// 不合法就回退到与 PumpState 初值一致的默认值。
+static float clampF(float v, float lo, float hi, float def) {
+  return isfinite(v) ? constrain(v, lo, hi) : def;
+}
+
 void saveParams() {
   if (!pump.eepromDirty) return;
   EEPROM.put(EEPROM_ADDR,     (uint16_t)EEPROM_MAGIC);
@@ -54,18 +62,18 @@ bool loadParams() {
   if (pump.currentLiquid >= NUM_LIQUIDS) pump.currentLiquid = 0;
   EEPROM.get(EEPROM_ADDR + 60, pump.jetPressure);
 
-  pump.stepsPerMl    = constrain(pump.stepsPerMl,    10, 50000);
-  pump.flowRate      = constrain(pump.flowRate,      0.1, 1600.0);
-  pump.targetVolume  = constrain(pump.targetVolume,  0.1, 99999);
-  pump.targetTime    = constrain(pump.targetTime,    1, 86400);
-  pump.antiDripVol   = constrain(pump.antiDripVol,   0, 5.0);
-  pump.tubeLifeML    = constrain(pump.tubeLifeML,    0, 200000);
-  pump.jetVolume     = constrain(pump.jetVolume,     0.1, 10.0);
-  pump.jetInterval   = constrain(pump.jetInterval,   1, 60);
-  pump.jetFlowRate   = constrain(pump.jetFlowRate,   10, 1600.0);
-  pump.jetPressure   = constrain(pump.jetPressure,   1, 10);
+  pump.stepsPerMl    = clampF(pump.stepsPerMl,    10, 50000,  250.0);
+  pump.flowRate      = clampF(pump.flowRate,      0.1, 1600.0, 50.0);
+  pump.targetVolume  = clampF(pump.targetVolume,  0.1, 99999,  10.0);
+  pump.targetTime    = clampF(pump.targetTime,    1, 86400,    30.0);
+  pump.antiDripVol   = clampF(pump.antiDripVol,   0, 5.0,       0.05);
+  pump.tubeLifeML    = clampF(pump.tubeLifeML,    0, 200000,  50000);
+  pump.jetVolume     = clampF(pump.jetVolume,     0.1, 10.0,    1.0);
+  pump.jetInterval   = clampF(pump.jetInterval,   1, 60,        3.0);
+  pump.jetFlowRate   = clampF(pump.jetFlowRate,   10, 1600.0, 200.0);
+  pump.jetPressure   = clampF(pump.jetPressure,   1, 10,        5.0);
   for (int i = 0; i < NUM_LIQUIDS; i++)
-    pump.liquidSPM[i] = constrain(pump.liquidSPM[i], 10, 50000);
+    pump.liquidSPM[i] = clampF(pump.liquidSPM[i], 10, 50000, 250.0);
   pump.stepsPerMl = pump.liquidSPM[pump.currentLiquid];
   return true;
 }

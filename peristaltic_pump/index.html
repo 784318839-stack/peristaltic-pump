@@ -569,12 +569,12 @@ function wifiSave() {
     body: JSON.stringify({ssid, pass, mode: ssid ? 1 : 0})
   }).then(r => r.json()).then(d => {
     if (d.ok) {
-      toast('WiFi 配置已保存，正重启网络...');
-      sendCmd('wifi_restart');
+      /* 固件已在返回响应后自己 restartWiFi(), 不要再发 wifi_restart (会重启第二次) */
+      toast('WiFi 配置已保存，正在重启网络，请稍候重新连接...');
     } else {
       toast('保存失败', true);
     }
-  });
+  }).catch(() => toast('保存失败：连接中断', true));
 }
 
 let wifiScanTimer = null;
