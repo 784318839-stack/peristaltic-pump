@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>蠕动泵控制器 DM542 — Web UI 交互预览（模拟后端）</title>
+<!--
+  独立可双击打开的版本，由 `python tools/make_ui_preview.py` 从
+  peristaltic_pump/index.html 自动拼装 —— 本文件是那个拼装用的外壳模板，
+  四个 {{...}} 占位符分别填入固件的 CSS / 页面结构 / 模拟后端 / 前端 JS。
+
+  固件里真正使用的是 peristaltic_pump/index.html（经 generate_web_ui.py 压缩进
+  web_ui_gen.h）。预览**不参与固件构建**，改这里不会影响设备上的页面；
+  反过来，改了 index.html 或 tools/ui_preview_sim.js 要重新拼装预览才会跟上
+  （`make_ui_preview.py --check` 用来检查预览是否已过期）。
+
+  CSS / 页面结构 / 前端 JS 三段与 index.html 逐字一致（仅补回一条预览专用的
+  `.input-row input{min-width:0}`，避免窄屏输入框撑破 flex）。命令日志面板
+  （#simLog）由拼装脚本插进 <main> 开头。
+
+  模拟后端按 command_protocol.cpp / pump_machine.cpp / pump_core.cpp 的实际语义实现：
+  状态机流转、命令的校验范围与错误消息、遥测字段（含 calibFlow / calibLiquid）、
+  四个 HTTP 端点的应答形状。当前对齐的固件语义：
+    · 校准只写 calibLiquid / calibTargetVol / calibFlowRate，不碰 mode / flowRate /
+      targetVolume / liquidIdx / stepsPerMl，唯一提交点是 calib_save
+    · CALIBRATE 菜单下 set_mode / set_flow / set_volume / set_time / set_liquid /
+      start / prime_start 全部报错，stop / reset 转 calibStopRun()
+    · TIME 模式进度由前端按 elapsed / targetTime 画成倒计时，PAUSED 时 elapsed 冻结
+  顶部虚线框里的倍速控制和命令日志是预览专用，固件 UI 里没有。
+-->
+<style>
+{{FIRMWARE_CSS}}
+
+/* ===== 以下为预览专用样式，不属于固件里的 index.html ===== */
+#simBar{background:#1c2128;border-bottom:1px dashed var(--accent);padding:8px 12px;font-size:12px;color:var(--text2)}
+#simBar .inner{max-width:480px;margin:0 auto;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+#simBar b{color:var(--accent);font-weight:600}
+#simBar button{padding:4px 10px;min-height:28px;font-size:12px;border-radius:6px;background:var(--border);color:var(--text);font-weight:500}
+#simBar button.on{background:var(--accent);color:#fff}
+#simLog{max-width:480px;margin:0 auto 10px;background:#0b0f14;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.5;max-height:150px;overflow-y:auto}
+#simLog .c{color:#58a6ff}#simLog .r{color:var(--text2)}#simLog .e{color:var(--red)}#simLog .t{color:var(--text3)}
+#simLog summary{cursor:pointer;color:var(--text2);font-family:inherit;font-size:11px}
+</style>
+</head>
+<body>
+
+<div id="simBar">
+  <div class="inner">
+    <span>🔬 <b>模拟预览</b> — 后端是假的，状态机按固件语义仿真</span>
+    <span>
+      倍速
+      <button data-sp="1" class="on">1×</button><button data-sp="5">5×</button><button data-sp="20">20×</button>
+    </span>
+  </div>
+</div>
+
+{{MARKUP}}
+
+<script>
+{{SIM_BACKEND}}
+</script>
+
+<script>
+{{UI_SCRIPT}}
+</script>
+</body>
+</html>
