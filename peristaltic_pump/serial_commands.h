@@ -2,7 +2,7 @@
  * serial_commands.h — USB CDC 串口命令
  *
  * 通过 USB 串口收发 JSON 命令 , 换行 `\n` 分隔每帧
- * 与 HTTP / BLE 共用同一套 parseAndExecute() 引擎
+ * 与 HTTP 共用同一套 parseAndExecute() 引擎
  * 同时支持硬件 UART1 ( GPIO 21 = RX , 47 = TX ) 供 USB-TTL 直连
  ******************************************************************************/
 #ifndef SERIAL_COMMANDS_H

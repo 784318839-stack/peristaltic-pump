@@ -6,8 +6,6 @@
 //   DONE       : bright green flash -> fade
 //   ANTI_DRIP  : cyan quick pulse
 //   Tube >80%  : red overlay blink (superimposed)
-//   WiFi client: white subtle glow overlay
-//   BLE conn   : cyan micro-glow overlay
 #include "led.h"
 #include "pump_shared.h"
 #include "pump_state.h"
@@ -24,10 +22,7 @@ static unsigned long g_phase = 0;   // phase accumulator for animations
 
 static State    g_lastState    = STATE_IDLE;
 static PumpMode g_lastMode     = MODE_VOLUME;
-static bool     g_lastEnabled  = true;
 static int      g_lastTubePct  = 0;
-static bool     g_lastWifiCli  = false;
-static bool     g_lastBleConn  = false;
 
 // ----- Helpers -----
 static void setRGB(uint8_t r, uint8_t g, uint8_t b) {
@@ -58,7 +53,6 @@ void led_tick() {
   // Base color from pump state
   uint8_t r = 0, g = 0, b = 0;
   float dim = 1.0;
-  bool pulse = false;
 
   switch (pump.state) {
     case STATE_IDLE:
@@ -81,7 +75,6 @@ void led_tick() {
     case PAUSED:
       r = 60; g = 30; b = 0;     // amber
       dim = 0.3 + 0.4 * (1 + sin(g_phase * 0.1));
-      pulse = true;
       break;
 
     case DONE:
@@ -98,13 +91,6 @@ void led_tick() {
     case ANTI_DRIP:
       r = 0; g = 50; b = 50;     // cyan
       dim = 0.3 + 0.5 * (1 + sin(g_phase * 0.3));
-      pulse = true;
-      break;
-
-    case STALL_ERROR:
-      // Fast red blink (alarm)
-      r = 120; g = 0; b = 0;
-      dim = (sin(g_phase * 0.3) > 0) ? 1.0 : 0.1;
       break;
   }
 
@@ -120,16 +106,11 @@ void led_tick() {
   setRGBDim(r, g, b, dim);
 
   // Reset phase on state change (for DONE fade timing)
-  if (pump.state != g_lastState    || pump.mode   != g_lastMode ||
-      pump.stepperEnabled != g_lastEnabled || tubeWarn != (g_lastTubePct > 80)) {
+  if (pump.state != g_lastState || pump.mode != g_lastMode ||
+      tubeWarn != (g_lastTubePct > 80)) {
     g_phase = 0;
   }
   g_lastState   = pump.state;
   g_lastMode    = pump.mode;
-  g_lastEnabled = pump.stepperEnabled;
   g_lastTubePct = (pump.tubeLifeML > 0) ? (int)(pump.totalDispensed / pump.tubeLifeML * 100) : 0;
-}
-
-void led_update() {
-  // Called from setup/loop to sync state - tick handles everything
 }

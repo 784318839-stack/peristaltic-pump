@@ -5,7 +5,6 @@
 
 struct PumpState {
   State     state         = STATE_IDLE;
-  State     prevState     = STATE_IDLE;
   PumpMode  mode          = MODE_VOLUME;
   Menu      currentMenu   = MAIN;
   CalibStep calibStep     = CALIB_IDLE;
@@ -36,9 +35,6 @@ struct PumpState {
   long  calibStepsRun   = 0;
   float calibNewSPM     = 0;
   bool          stepperEnabled      = true;
-  unsigned long lastStepperActivity = 0;
-  long          stallLastPosition   = 0;
-  unsigned long stallCheckTime      = 0;
   bool eepromDirty = false;
   long          pausedRemainingSteps = 0;
   unsigned long pausedElapsedSec     = 0;

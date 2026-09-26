@@ -14,46 +14,6 @@
 #include <esp_heap_caps.h>
 
 // ============================================================================
-//                            FreeRTOS 鍛戒护闃熷垪
-// ============================================================================
-static QueueHandle_t cmdQueue = nullptr;
-static CommandResponseCallback g_responseCb = nullptr;
-
-void initCommandQueue() {
-  cmdQueue = xQueueCreate( CMD_QUEUE_SIZE, sizeof( CommandMsg ) );
-}
-
-void setCommandResponseCallback( CommandResponseCallback cb ) {
-  g_responseCb = cb;
-}
-
-bool enqueueCommand( const char* json ) {
-  return enqueueCommandClient( json, 0 );  // clientId = 0 琛ㄧず鏃犲鎴风 ( 涓插彛 )
-}
-
-bool enqueueCommandClient( const char* json, uint32_t clientId ) {
-  if ( !cmdQueue ) return false;
-  CommandMsg msg;
-  msg.clientId = clientId;
-  strncpy( msg.json, json, CMD_JSON_MAX - 1 );
-  msg.json[CMD_JSON_MAX - 1] = '\0';
-  BaseType_t ret = xQueueSend( cmdQueue, &msg, 0 );  // 闈為樆濉炲叆闃?
-  return ( ret == pdTRUE );
-}
-
-void processCommandQueue() {
-  if ( !cmdQueue ) return;
-  CommandMsg msg;
-  while ( xQueueReceive( cmdQueue, &msg, 0 ) == pdTRUE ) {
-    const char* response = parseAndExecute( msg.json );
-    // 濡傛灉鏈?HTTP 瀹㈡埛绔叧鑱斾笖娉ㄥ唽浜嗗洖璋?, 灏嗗搷搴斿彂鍥?
-    if ( msg.clientId != 0 && g_responseCb && response ) {
-      g_responseCb( msg.clientId, response );
-    }
-  }
-}
-
-// ============================================================================
 //                            JSON 瑙ｆ瀽 & 鍛戒护璺敱
 // ============================================================================
 
@@ -109,7 +69,6 @@ const char* parseAndExecute( const char* json ) {
   // ===================================================================
 
   if ( strcmp( cmd, "start" ) == 0 ) {
-    if ( pump.state == STALL_ERROR ) return errResponse( cmd, "Motor stalled! Reset first" );
     if ( pump.state != STATE_IDLE && pump.state != DONE ) return errResponse( cmd, "Pump not idle" );
     if ( pump.mode == MODE_JET ) startJetCycle();
     else startPump();
@@ -474,23 +433,13 @@ const char* buildTelemetryJson() {
     case PAUSED:      stateStr = "PAUSED";      break;
     case DONE:        stateStr = "DONE";        break;
     case ANTI_DRIP:   stateStr = "ANTI_DRIP";   break;
-    case STALL_ERROR: stateStr = "STALL_ERROR"; break;
     default: break;
   }
 
   const char* menuStr = "MAIN";
   switch ( pump.currentMenu ) {
-    case SET_FLOW:         menuStr = "SET_FLOW";         break;
-    case SET_VOL:          menuStr = "SET_VOL";          break;
-    case SET_TIME:         menuStr = "SET_TIME";         break;
-    case CALIBRATE:        menuStr = "CALIBRATE";        break;
-    case PRIME:            menuStr = "PRIME";            break;
-    case SET_JET_VOL:      menuStr = "SET_JET_VOL";      break;
-    case SET_JET_INTERVAL: menuStr = "SET_JET_INTERVAL"; break;
-    case SET_JET_FLOW:     menuStr = "SET_JET_FLOW";     break;
-    case SET_JET_PRESSURE: menuStr = "SET_JET_PRESSURE"; break;
-    case SELECT_LIQUID:    menuStr = "SELECT_LIQUID";    break;
-    case JET_OPTIONS:      menuStr = "JET_OPTIONS";      break;
+    case CALIBRATE: menuStr = "CALIBRATE"; break;
+    case PRIME:     menuStr = "PRIME";     break;
     default: break;
   }
 

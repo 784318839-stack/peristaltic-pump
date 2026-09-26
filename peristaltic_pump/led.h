@@ -22,7 +22,4 @@ void led_init();
 // 每帧推进呼吸灯动画 ( loop 中调用 , ~50 fps )
 void led_tick();
 
-// 同步泵状态到 LED ( loop 末尾调用 )
-void led_update();
-
 #endif

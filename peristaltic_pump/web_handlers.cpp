@@ -299,21 +299,6 @@ static void handleRequest(WiFiClient &client, const String &method,
     scanBusy = false;
     return;
   }
-  if (method == "GET" && path.startsWith("/api/info")) {
-    const char* mode;
-    const char* ip;
-    int clients;
-    getWiFiStatus(mode, ip, clients);
-
-    char buf[256];
-    snprintf(buf, sizeof(buf),
-      "{\"mode\":\"%s\",\"ip\":\"%s\",\"clients\":%d,\"staConnected\":%s,\"mac\":\"%s\"}",
-      mode, ip, clients,
-      (WiFi.status() == WL_CONNECTED) ? "true" : "false",
-      WiFi.macAddress().c_str());
-    sendJson(client, 200, buf);
-    return;
-  }
 
   // 404
   sendJson(client, 404, "{\"ok\":false,\"error\":\"Not found\"}");

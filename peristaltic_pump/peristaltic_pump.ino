@@ -11,7 +11,6 @@
 #include "serial_commands.h"
 #include "wifi_manager.h"
 #include "web_handlers.h"
-#include "bluetooth_manager.h"
 
 #include "pump_state.h"
 #include "pump_shared.h"
@@ -59,13 +58,11 @@ void setup() {
     digitalWrite(ENA_PIN, HIGH);
     pump.stepperEnabled = true;
   }
-  pump.lastStepperActivity = millis();
   updateStepperSpeed();
   Serial.println("[SETUP] gpio ok");
 
   initSerialCommands(); Serial.println("[SETUP] serial ok");
   initHardwareUart(); Serial.println("[SETUP] hw uart ok");
-  initBluetooth(); Serial.println("[SETUP] ble ok");
   initWiFi(); initWebServer(); Serial.println("[SETUP] wifi ok");
   led_init(); Serial.println("[SETUP] led ok");
 
@@ -79,12 +76,8 @@ void loop() {
   processSerialCommands();
   processHardwareUart();
   handleWebClients();
-  handleBluetooth();
-  wifiMaintain();
 
   pump_machine_tick();
 
   if (pump.eepromDirty && (pump.state == STATE_IDLE || pump.state == DONE)) saveParams();
-
-  led_update();
 }

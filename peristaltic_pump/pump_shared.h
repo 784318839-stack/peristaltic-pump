@@ -13,10 +13,9 @@
 //                              Enums
 // ============================================================================
 enum PumpMode { MODE_VOLUME, MODE_TIME, MODE_JET };
-enum State    { STATE_IDLE, RUNNING, PAUSED, DONE, ANTI_DRIP, STALL_ERROR };
-enum Menu     { MAIN, SET_FLOW, SET_VOL, SET_TIME, CALIBRATE, PRIME,
-                SET_JET_VOL, SET_JET_INTERVAL, SET_JET_FLOW, SET_JET_PRESSURE,
-                SELECT_LIQUID, JET_OPTIONS };
+enum State    { STATE_IDLE, RUNNING, PAUSED, DONE, ANTI_DRIP };
+// OLED + 4x4 键盘已停用, 只剩这三个界面状态会被实际赋值
+enum Menu     { MAIN, CALIBRATE, PRIME };
 enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
                  CALIB_RUN, CALIB_MEASURE, CALIB_RESULT, CALIB_SETTINGS };
 
@@ -30,8 +29,6 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define BUZZER_PIN 5
 #define HW_UART_RX 21
 #define HW_UART_TX 47
-#define IDLE_DISABLE_MS   5000
-#define STALL_TIMEOUT_MS  1500
 #define EEPROM_MAGIC  0x5061  // v4.2: 400 pulse/rev 细分 (revert from 1600)
 #define EEPROM_ADDR   0
 #define ACCEL_FACTOR  0.3f

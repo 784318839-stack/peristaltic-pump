@@ -68,7 +68,6 @@ static void startSeq( int f0, int d0, int f1, int d1, int f2, int d2,
 // ---- 音效 ----
 // freq>0 = 发声段 , freq=0 = 静音间隔
 
-void beepInput()   { startSeq( 1200, 12,  0, 0,  0, 0,  0, 0,  0, 0 ); }
 void beepConfirm() { startSeq(  880, 80,  0, 0,  0, 0,  0, 0,  0, 0 ); }
 void beepCancel()  { startSeq(  440, 80,  0, 0,  0, 0,  0, 0,  0, 0 ); }
 
@@ -80,6 +79,3 @@ void beepPause()   { startSeq(  880, 50,  0, 35,  660, 80,  0, 0,  0, 0 ); }
 
 // 完成 : 1000 Hz 60ms → 静音 45ms → 1000 Hz 60ms → 静音 45ms → 1000 Hz 100ms
 void beepDone()    { startSeq( 1000, 60,  0, 45, 1000, 60,  0, 45, 1000, 100 ); }
-
-// 断电 : 200 Hz 80ms
-void beepDisable() { startSeq(  200, 80,  0, 0,  0, 0,  0, 0,  0, 0 ); }

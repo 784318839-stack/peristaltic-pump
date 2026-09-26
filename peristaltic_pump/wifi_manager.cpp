@@ -40,9 +40,6 @@ static void cryptData(uint8_t* data, size_t len) {
 static WiFiConfig wifiCfg;
 static String apSSID;
 static IPAddress localIP;
-static bool wifiReady = false;
-static unsigned long staConnectStart = 0;
-static bool staConnecting = false;
 
 void initWiFi() {
   // 0. 禁用 WiFi NVS 持久化: 防止 ESP-IDF 从 NVS 自动加载旧 AP 配置
@@ -79,37 +76,11 @@ void initWiFi() {
   // 5. 如有 STA 配置，后台连接家里 WiFi
   if (hasConfig && wifiCfg.mode == WIFI_MODE_STA_FALLBACK && strlen(wifiCfg.ssid) > 0) {
     WiFi.begin(wifiCfg.ssid, wifiCfg.pass);
-    staConnectStart = millis();
-    staConnecting = true;
   }
 
   // 6. 启动 mDNS
   if (MDNS.begin("pump")) {
     MDNS.addService("http", "tcp", 80);
-  }
-
-  wifiReady = true;
-}
-
-// STA 连接维护 (loop 中调用)
-void wifiMaintain() {
-  if (!staConnecting) return;
-
-  wl_status_t status = WiFi.status();
-
-  if (status == WL_CONNECTED) {
-    // 连接成功, mDNS 已在 initWiFi 注册好, 无需重注册
-    staConnecting = false;
-    return;
-  }
-
-  // 超时 (30 秒) 或连接失败 → 放弃本次 STA 尝试, SoftAP 仍在
-  if (millis() - staConnectStart > 30000 ||
-      status == WL_CONNECT_FAILED ||
-      status == WL_NO_SSID_AVAIL ||
-      status == WL_CONNECTION_LOST) {
-    staConnecting = false;
-    // 不 disconnnect — 让 WiFi stack 自己管理
   }
 }
 
@@ -127,10 +98,6 @@ void getWiFiStatus(const char*& mode, const char*& ip, int& clientCount) {
   }
   ip = ipBuf;
   clientCount = WiFi.softAPgetStationNum();
-}
-
-const char* getApSSID() {
-  return apSSID.c_str();
 }
 
 bool loadWiFiConfig(WiFiConfig& cfg) {
@@ -197,6 +164,5 @@ void restartWiFi() {
   WiFi.softAPdisconnect(true);
   WiFi.disconnect(true, true);
   delay(500);
-  staConnecting = false;
   initWiFi();
 }
