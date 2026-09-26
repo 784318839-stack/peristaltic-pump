@@ -20,8 +20,9 @@ bool applySpeed( float pps, float accel );
 // 按 mL/min 设定速度 (内部换算成 pps 后调 applySpeed)
 void  applyFlowSpeed( float mLmin );
 
-// 用「用户设定的流量」更新速度 —— 待机 / set_flow / 校准用这个。
-// 运行中请用 applyFlowSpeed(pump.activeFlowRate), TIME 模式下两者不同。
+// 用「用户设定的流量」更新速度 —— 待机 / set_flow 用这个。
+// 运行中请用 applyFlowSpeed(pump.activeFlowRate), TIME 模式下两者不同;
+// 校准运行用 applyFlowSpeed(pump.calibFlowRate), 两者也不同。
 void  updateStepperSpeed();
 
 // ---- 使能管理 ----
@@ -43,7 +44,13 @@ void stopJetCycle();
 void selectLiquid( int idx );
 
 // ---- 校准向导 ----
+// 校准只读写 calib* 字段, 不改 mode / flowRate / targetVolume / currentLiquid /
+// stepsPerMl; 唯一的提交点是 calibSave()
 void calibEnter();
+// 退出校准向导 (calib_abort / calib_settings_done / menu_main 都走这里)
+void calibLeave();
+// 本次校准用的 stepsPerMl —— 取自向导第 1 步选的 calibLiquid, 不是日常那个
+float calibSPM();
 void calibStartRun();
 void calibStopRun();
 void calibFinishRun();

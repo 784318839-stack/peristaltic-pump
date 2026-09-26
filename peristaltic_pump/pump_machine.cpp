@@ -37,8 +37,10 @@ void pump_machine_tick() {
 
 static void tick_running() {
   if (pump.calibRunning) {
+    // 用 calibSPM() 而不是 pump.stepsPerMl: 校准的液体可能不是日常选中的那个,
+    // 而 stepsPerMl 属于日常设定, 校准全程不改它
     if (!stepper->isRunning()) { pump.dispensedVolume = pump.calibTargetVol; calibFinishRun(); }
-    else { pump.dispensedVolume = (float)stepper->getCurrentPosition() / pump.stepsPerMl; }
+    else { pump.dispensedVolume = (float)stepper->getCurrentPosition() / calibSPM(); }
     return;
   }
 

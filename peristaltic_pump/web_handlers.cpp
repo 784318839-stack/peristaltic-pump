@@ -175,13 +175,14 @@ static void handleRequest(WiFiClient &client, const char* method,
     return;
   }
 
-  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii -> 命令
+  // GET /api/cmd?c=xxx&v=yyy&s=zzz&m=mmm&i=iii&f=fff -> 命令
   if (isGet && strncmp(path, "/api/cmd", 8) == 0) {
     String cmd  = getQueryParam(path, "c");
     String val  = getQueryParam(path, "v");
     String slot = getQueryParam(path, "s");
     String mode = getQueryParam(path, "m");
     String idx  = getQueryParam(path, "i");
+    String flow = getQueryParam(path, "f");   // 校准流量, 仅 calib_set_vol 用
 
     if (cmd.length() == 0) {
       sendJson(client, 400, "{\"ok\":false,\"error\":\"Missing cmd\"}");
@@ -201,6 +202,10 @@ static void handleRequest(WiFiClient &client, const char* method,
     if (idx.length() > 0) {
       if (params.length() > 0) params += ",";
       params += "\"index\":" + idx;
+    }
+    if (flow.length() > 0) {
+      if (params.length() > 0) params += ",";
+      params += "\"flow\":" + flow;
     }
 
     String jsonCmd;

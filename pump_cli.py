@@ -11,6 +11,7 @@
   python pump_cli.py set_flow 75.0   # 设置流量 75 mL/min
   python pump_cli.py set_volume 25.0 # 设置目标体积 25 mL
   python pump_cli.py set_mode JET    # 切换为喷射模式
+  python pump_cli.py calib_set_vol 100 --flow 800  # 校准: 100 mL, 本次流量 800 mL/min
   python pump_cli.py monitor         # 持续监控 (Ctrl+C 退出)
   python pump_cli.py --port COM5 ... # 指定端口
 
@@ -150,8 +151,10 @@ def main():
     sub.add_parser("calib_enter", help="进入校准向导")
     p_cl = sub.add_parser("calib_select_liquid", help="校准: 选择液体")
     p_cl.add_argument("index", type=int, choices=[0, 1, 2, 3])
-    p_csv = sub.add_parser("calib_set_vol", help="校准: 设定校准体积")
+    p_csv = sub.add_parser("calib_set_vol", help="校准: 设定校准体积与本次校准流量")
     p_csv.add_argument("value", type=float)
+    p_csv.add_argument("--flow", type=float, default=None,
+                       help="本次校准流量 mL/min (0.1-1600); 只作用于这次校准, 不改日常流量")
     sub.add_parser("calib_start_run", help="校准: 启动校准泵")
     sub.add_parser("calib_stop_run", help="校准: 停止校准泵")
     p_cm = sub.add_parser("calib_measure", help="校准: 输入量筒实测体积")
@@ -245,7 +248,19 @@ def main():
             resp = send_command(ser, "calib_select_liquid", {"index": args.index})
             print("[OK] 已选液体" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 
-        elif args.action in ("calib_set_vol", "calib_measure"):
+        elif args.action == "calib_set_vol":
+            params = {"value": args.value}
+            if args.flow is not None:
+                params["flow"] = args.flow
+            resp = send_command(ser, "calib_set_vol", params)
+            if resp.get("ok"):
+                cdata = resp.get("data") or {}
+                print(f"[OK] 校准体积={cdata.get('calibTargetVol', args.value)} mL  "
+                      f"校准流量={cdata.get('calibFlow', '未改动')} mL/min")
+            else:
+                print(f"[FAIL] {resp.get('error')}")
+
+        elif args.action == "calib_measure":
             resp = send_command(ser, args.action, {"value": args.value})
             print(f"[OK] {args.action}={args.value}" if resp.get("ok") else f"[FAIL] {resp.get('error')}")
 

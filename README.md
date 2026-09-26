@@ -103,6 +103,10 @@ ESP32 GND ──────────── DIR-
 - **暂停 / 恢复** — 暂停时先 `forceStop()`，再轮询 `isRunning()` 到 false 才记录断点。
   `isRunning()` 的定义含 `!isQueueEmpty()`，所以轮询它就是等待硬停完成的公开做法
   （`blockingWaitForForceStopComplete()` 是 private，用不了）。这样恢复不会多打
+- **定时模式倒计时** — Web UI 在 `TIME` 模式下把进度显示成 `⏳ 剩余 m:ss`（超过一小时为
+  `h:mm:ss`），进度条按 `elapsed / targetTime` 走，右侧目标值显示秒数而不是毫升；
+  `DONE` 显示「已完成」。暂停时遥测报冻结的 `pumpElapsed`，倒计时不会跳回满值。
+  校准向导期间不显示倒计时 —— 校准那次运行始终是体积式的，与日常 `mode` 无关
 - **防滴回吸** — 完成后以 0.3× 速度反转吸回 `antiDripVol`（0–5 mL），进入 `ANTI_DRIP` 状态。
   注意 `stop` / `reset` **可以**打断它
 - **预灌 / 快排** — 1500 mL/min 全速排空管路，`moveTo(999999999)` 由 `forceStop()` 结束
@@ -112,8 +116,23 @@ ESP32 GND ──────────── DIR-
 ### 校准与液体
 
 - **4 种液体独立校准** — `Wtr` / `Thk` / `Liq1` / `Liq2`，各自独立的 `stepsPerMl`
-- **校准向导** — 选液体 → 设体积（默认 10 mL）→ 运行 → 读量筒实际体积 → 计算并保存。
+- **校准向导** — 选液体 → 设体积与流量 → 运行 → 读量筒实际体积 → 计算并保存。
   `calib_abort` 可在任意步退出
+- **校准用自己的液体 / 体积 / 流量** — 向导里选的分别写进 `calibLiquid` / `calibTargetVol` /
+  `calibFlowRate`，校准运行全程只用这三个字段（步数按 `calibSPM()` = `liquidSPM[calibLiquid]`
+  算），**不碰** `mode` / `flowRate` / `targetVolume` / `currentLiquid` / `stepsPerMl`。
+  校准 1500 mL 时可以单独提速，日常设定一点不受影响
+- **唯一的提交点是 `calib_save`** — `calibSave()` 才把 `calibLiquid` 写成 `currentLiquid`、
+  把新 `stepsPerMl` 写进对应的 `liquidSPM[]` 槽位并落盘；中途 `calib_abort` / `menu_main`
+  退出则日常设定一字不变
+  > 旧做法是进向导时把 `mode` 强制成 `VOLUME`、退出时还原。但 `calib_save` 在还原之前就
+  > `markDirty()` + `saveParams()`，而 `mode` 是落盘字段（EEPROM offset 18）——
+  > 校准保存一次，用户的 `TIME` / `JET` 模式就被永久写成 `VOLUME`。现在改成完全不碰它
+- **校准期间锁定主面板** — `set_mode` / `set_flow` / `set_volume` / `set_time` / `set_liquid` /
+  `start` / `prime_start` 在 `CALIBRATE` 菜单下一律返回错误（它们要么改日常设定，要么会把
+  `currentMenu` 打回 `MAIN` 让向导悄悄死掉）；`stop` / `reset` 转成 `calibStopRun()`
+  （会清 `calibRunning`），三条退出路径统一走 `calibLeave()`。Web UI 相应把模式标签、
+  液体按钮、全部日常参数输入框和主启动键置灰，`停止` / `暂停` 保留可用
 - 算出的 `stepsPerMl` 会被钳到 10–50000，且 `calib_measure` / `calib_save` /
   `calibSave()` 三层校验，杜绝把 0 或 NaN 写进 EEPROM
 
@@ -132,7 +151,7 @@ ESP32 GND ──────────── DIR-
   `buzzer_tick()` 每帧推进，绝不 `delay()`
 - **WS2812 状态灯** — 待机暗绿呼吸 / 运行蓝（TIME 深蓝、JET 品红）/ 暂停琥珀脉动 /
   完成亮绿在 `DONE_HOLD_MS` 内渐暗 / 回吸青色脉动；管路寿命 > 80% 时叠加红色闪烁
-- **实时遥测** — `/api/status` 返回完整 JSON，前端 1 s 轮询（`index.html:272`）
+- **实时遥测** — `/api/status` 返回完整 JSON，前端 1 s 轮询（`index.html:273`）
 
 ### 智能保护
 
@@ -178,8 +197,9 @@ ESP32 GND ──────────── DIR-
 
 内嵌单页应用（`index.html` 编译进 `web_ui_gen.h`），手机端 PWA：
 
-实时仪表盘（状态 / 模式 / 进度 / 流量 / 体积 / 时间）· 运行控制 · 参数设置 ·
-模式切换 · 液体选择 · 校准向导 · 预灌快排 · WiFi 管理（扫描 / 配置 / 密码明文切换）·
+实时仪表盘（状态 / 模式 / 进度 / 流量 / 体积 / 时间，**定时模式显示倒计时**）· 运行控制 ·
+参数设置 · 模式切换 · 液体选择 · 校准向导（液体 / 体积 / 本次校准流量独立设定，
+期间主面板日常参数与模式标签锁定）· 预灌快排 · WiFi 管理（扫描 / 配置 / 密码明文切换）·
 高级设置独立面板（回吸量 / 管路寿命）· 管路寿命百分比 · PSRAM 与堆内存监控 ·
 header 显示当前可访问地址 · STA 连接成功自动弹提示
 
@@ -187,10 +207,10 @@ header 显示当前可访问地址 · STA 连接成功自动弹提示
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/` | Web UI 页面（约 24 KB，内嵌） |
+| GET | `/` | Web UI 页面（约 27 KB，内嵌） |
 | GET | `/manifest.json` | PWA 清单 |
 | GET | `/api/status` | 完整遥测 JSON |
-| GET | `/api/cmd?c=<cmd>&v=&s=&m=&i=` | 发送命令 |
+| GET | `/api/cmd?c=<cmd>&v=&s=&m=&i=&f=` | 发送命令（`f` = 校准流量，仅 `calib_set_vol` 用） |
 | POST | `/api/wifi` | 保存 WiFi 配置（**响应发完后**固件才重启网络） |
 | GET | `/api/scan` | 扫描附近 WiFi（同步阻塞 ~8 s，结果缓存 15 s，泵忙时拒绝） |
 
@@ -216,7 +236,7 @@ header 显示当前可访问地址 · STA 连接成功自动弹提示
 | `jet_start` / `jet_stop` | — | 喷射启停（JET 模式下与 `start` / `stop` 等效） |
 | `set_anti_drip` | `value`: 0–5 | 回吸量 mL |
 | `set_tube_life` | `value`: 0–200000 | 管路寿命 mL（0 = 禁用） |
-| `calib_enter` → `calib_select_liquid` → `calib_set_vol` → `calib_start_run` → `calib_stop_run` → `calib_measure` → `calib_save` → `calib_settings_done` | 见说明 | 校准向导；`calib_abort` 可在任意步退出 |
+| `calib_enter` → `calib_select_liquid` → `calib_set_vol` → `calib_start_run` → `calib_stop_run` → `calib_measure` → `calib_save` → `calib_settings_done` | `calib_select_liquid`: `index` 0–3（写 `calibLiquid`，保存后才成为日常液体）；`calib_set_vol`: `value` 0.1–99999（校准体积 mL）+ 可选 `flow` 0.1–1600（本次校准流量 mL/min，缺省沿用当前 `flowRate`）；`calib_measure`: `value`（量筒实测 mL） | 校准向导；`calib_abort` 可在任意步退出。向导只写 `calibLiquid` / `calibTargetVol` / `calibFlowRate`，**不改任何日常设定**，唯一提交点是 `calib_save`。**向导期间主面板锁定**：`set_mode` / `set_flow` / `set_volume` / `set_time` / `set_liquid` / `start` / `prime_start` 返回错误，`stop` / `reset` 转成 `calibStopRun()`（会清 `calibRunning`），退出统一走 `calibLeave()` |
 | `prime_start` / `prime_stop` | — | 预灌快排 |
 | `get_state` | — | 获取完整遥测 |
 | `wifi_restart` | — | 重启 WiFi |
@@ -239,6 +259,8 @@ header 显示当前可访问地址 · STA 连接成功自动弹提示
   "flow": 150.0,
   "targetVol": 50.0,
   "calibTargetVol": 10.0,
+  "calibFlow": 50.0,
+  "calibLiquid": 0,
   "targetTime": 30.0,
   "dispensed": 23.45,
   "elapsed": 9,
@@ -267,7 +289,12 @@ header 显示当前可访问地址 · STA 连接成功自动弹提示
 
 - `state`：`IDLE` / `RUNNING` / `PAUSED` / `DONE` / `ANTI_DRIP`
 - `menu`：`MAIN` / `CALIBRATE` / `PRIME`
-- `mode`：`VOLUME` / `TIME` / `JET`
+- `mode`：`VOLUME` / `TIME` / `JET` —— 始终是**用户的日常设定**，校准向导不会改它
+- `calibLiquid` / `calibTargetVol` / `calibFlow`：本次校准的液体与体积 / 流量，独立于日常的
+  `liquidIdx` / `targetVol` / `flow`，互不覆写；只有 `calib_save` 会把它们提交成日常值。
+  校准运行时 `progress` 以 `calibTargetVol` 为分母
+- `elapsed`：`RUNNING` 时是实时秒数，`PAUSED` 时是冻结的 `pumpElapsed`（定时模式倒计时靠它），
+  其它状态为 0
 - `liquid`：`Wtr` / `Thk` / `Liq1` / `Liq2`
 - `wifiMode`：`ap` 或 `sta+ap`
 - `heapTotal` 是 `ESP.getHeapSize()` 实测值；`psram*` / `heap*` 单位 KB
@@ -377,6 +404,10 @@ peristaltic-pump/                 # 仓库根 (master 分支)
 │   └── web_ui_gen.h              # 生成文件，勿手改
 ├── pump_cli.py                   # Python CLI 控制工具（tools/ 下有一份完全相同的副本）
 ├── tools/pump_cli.py
+├── tools/make_ui_preview.py      # index.html + 模板 + 模拟后端 → 单文件 UI 预览
+├── tools/ui_preview_template.html# 预览外壳（四个 {{...}} 占位符）
+├── tools/ui_preview_sim.js       # 预览用的模拟后端（照固件语义手写，不参与构建）
+├── tools/test_ui_preview_sim.js  # node 断言：模拟后端 vs 固件语义
 ├── xtoys_script.js               # XToys 集成脚本（已放弃，仅供参考）
 ├── xtoys_js_only.js
 ├── minimal_test/                 # 硬件最小验证 sketch
@@ -401,6 +432,28 @@ python peristaltic_pump/generate_web_ui.py
 > 修复 `//` 注释被压缩破坏的问题"）就是踩了这个坑之后修的。
 
 校验是否同步：重跑一次生成脚本后 `git diff -- peristaltic_pump/web_ui_gen.h` 应为空。
+
+### UI 预览（模拟后端，不上板点一遍）
+
+`tools/make_ui_preview.py` 把 `index.html` 的 CSS / 页面结构 / 前端 JS **逐字**拼进
+`tools/ui_preview_template.html`，再塞入 `tools/ui_preview_sim.js`（一个照固件语义手写的
+模拟后端），产出一个可以双击打开的单文件 HTML：
+
+```
+python tools/make_ui_preview.py             # 默认写到 ~/Desktop/蠕动泵UI预览-DM542.html
+python tools/make_ui_preview.py --out x.html
+python tools/make_ui_preview.py --check     # 只检查预览是否落后于 index.html（过期退出码 1）
+node   tools/test_ui_preview_sim.js         # 80 条断言：模拟后端与固件语义是否一致
+```
+
+预览顶部的倍速（1× / 5× / 20×）和命令日志面板是预览专用，固件 UI 里没有；命令日志会把
+模拟后端的收发和固件的校验报错都打出来，方便确认「这条命令为什么被拒」。产物**不入库**，
+用 `--check` 提醒重建。
+
+> 模拟后端是手写的：改了固件的命令校验 / 校准流程 / 遥测字段，就要同步改
+> `tools/ui_preview_sim.js`，并让 `test_ui_preview_sim.js` 继续通过。它会无头跑完整条链路
+> （TIME 模式倒计时 → 暂停冻结 → 进校准 → 主面板 7 条命令被拒 → 校准跑 100 mL →
+> 保存 → 放弃 → `menu_main`），逐字段断言日常设定没有被校准碰过。
 
 ### 命令行工具
 
@@ -546,6 +599,59 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 > 2026-09-26 之前的条目记录的是**当时**的代码状态。其中若干机制此后已被移除或改正
 > （FreeRTOS 命令队列、`/api/info`、STA 30 s 超时、3 秒堵转检测、"RMT 迁移"），
 > 阅读时请以 §2–§4 的当前描述为准。
+
+### 2026-09-26 — 校准向导独立参数 + 定时模式倒计时
+
+**校准不再碰日常设定：**
+
+- 向导第 1 / 2 步设定的液体、体积、流量分别写 `calibLiquid` / `calibTargetVol` /
+  `calibFlowRate`，新增 `calibSPM()`（= `liquidSPM[calibLiquid]`）供校准运行算步数；
+  `calibEnter()` **不再**把 `pump.mode` 强制成 `VOLUME`，`calibLeave()` 也就不必还原模式
+  （`savedMode` / `calibCtxSaved` 两个字段随之删除）
+- 由此修掉一个会永久改模式的坑：`calib_save` → `calibSave()` 在「还原模式」之前就
+  `markDirty()` + `saveParams()`，而 `mode` 是落盘字段（EEPROM offset 18）——
+  校准保存一次，用户的 `TIME` / `JET` 模式就被写成 `VOLUME`
+- `calib_select_liquid` 原先直接改 `pump.currentLiquid`（同样落盘，offset 59）且不同步
+  `stepsPerMl`；现在只写 `calibLiquid`，提交推迟到 `calibSave()`，中途放弃则日常液体
+  选择和它的 `stepsPerMl` 一字不变
+- `calibStartRun()` 不覆写 `targetVolume`（会落盘，`calibSave()` 会把校准体积误存成用户的
+  目标体积）；遥测 `progress` 与前端进度文本改为以 `calibTargetVol` 为分母
+- `calibStartRun()` 同步 `activeFlowRate = calibFlowRate` 并补设 `pumpStartMs`：校准中途
+  暂停再继续不会退回上次的流量，「已运行秒数」也不再是上次普通运行 / 开机以来的计时
+- 校准运行与日常 `mode` 解耦：`pausePump()` / `resumePump()` 的 TIME 分支、`stop` / `reset`
+  的 JET 分支都加 `!calibRunning` 条件 —— 用户日常是 TIME / JET 时校准也照体积式跑
+- `calib_measure` 响应里的 `oldSPM` 改用 `calibSPM()`（原来报的是日常液体的值）
+- `calib_set_vol` 改成**先校验体积和流量、再一起写入**：原来流量非法时虽然返回错误，
+  `calibTargetVol` 却已经被改了一半
+
+**校准期间锁定主面板：**
+
+- `set_mode` / `set_flow` / `set_volume` / `set_time` / `set_liquid` / `start` /
+  `prime_start` 在 `CALIBRATE` 菜单下返回错误（前四个结尾都会把 `currentMenu` 打回
+  `MAIN`，等于悄悄退出向导）；`stop` / `reset` 转走 `calibStopRun()`，不再留下
+  「电机已停但 `calibRunning` 仍为 true」的死状态；`menu_main` 同样统一走 `calibLeave()`
+- Web UI：模式标签与液体按钮 `pointer-events:none`，全部日常参数输入框与主启动键
+  `disabled`（`停止` / `暂停` 保留可用），第 1 / 2 步加提示说明这些设定不影响日常值，
+  第 3 步显示本次校准的液体与流量
+- 顺带修掉一处误导：`/api/scan` 在泵忙时返回 `{ok:false,error:"Pump busy",done:true}`，
+  前端原来一律显示「未发现 WiFi 网络」，现在会把 `error` 显示出来
+
+**定时模式倒计时：**
+
+- Web UI 在 `TIME` 模式把进度显示成 `⏳ 剩余 m:ss`（超过一小时为 `h:mm:ss`），进度条按
+  `elapsed / targetTime` 走，右侧目标值显示秒数；`DONE` 显示「已完成」。校准向导期间
+  仍按校准体积显示百分比
+- 遥测 `elapsed` 在 `PAUSED` 时报冻结的 `pumpElapsed`（原来报 0，一按暂停倒计时就跳回满值）
+
+**接口：** `calib_set_vol` 新增可选 `flow` 参数（HTTP `&f=`、CLI `--flow`）；遥测新增
+`calibFlow` / `calibLiquid`；`calib_set_vol` 与 `calib_select_liquid` 的成功响应回带设定值
+
+**工具：** UI 预览的拼装脚本与模拟后端收进 `tools/`（`make_ui_preview.py` +
+`ui_preview_template.html` + `ui_preview_sim.js` + `test_ui_preview_sim.js`）。
+`--check` 判断桌面预览是否落后于 `index.html`，`node tools/test_ui_preview_sim.js`
+用 80 条断言盯着模拟后端与固件语义的一致性（详见 §4）
+
+编译验证：固件 1051604 bytes (33%)、静态内存 52848 bytes (16%)、本项目代码零警告。
 
 ### 2026-09-26 — 维护性审查
 

@@ -104,7 +104,7 @@ button:active{transform:scale(.95);opacity:.8}
     <div class="progress-bar"><div class="progress-fill" id="progressBar"></div></div>
     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2)">
       <span id="stProgress">0%</span>
-      <span>目标: <span id="stTarget">--</span> mL</span>
+      <span><span id="stTargetLabel">目标</span>: <span id="stTarget">--</span> <span id="stTargetUnit">mL</span></span>
     </div>
   </div>
 
@@ -177,7 +177,7 @@ button:active{transform:scale(.95);opacity:.8}
     <h2>校准向导 <button class="btn-sm" style="float:right" onclick="sendCmd('calib_enter')">开始校准</button></h2>
     <div class="calib-steps" id="calibSteps">
       <div class="calib-step" data-step="0">1.选液体</div>
-      <div class="calib-step" data-step="1">2.设体积</div>
+      <div class="calib-step" data-step="1">2.体积/流量</div>
       <div class="calib-step" data-step="2">3.运行</div>
       <div class="calib-step" data-step="3">4.读数</div>
       <div class="calib-step" data-step="4">5.保存</div>
@@ -252,6 +252,8 @@ let currentLiquid = 0;
 let lastWifiMode = 'ap';
 let currentStep = -1;
 let lastCalibTargetVol = 10;
+let lastCalibFlow = 50;
+let lastCalibLiquid = 0;
 
 function safeSetInput(id, val) {
   const el = document.getElementById(id);
@@ -259,6 +261,14 @@ function safeSetInput(id, val) {
   if (document.activeElement === el) return;
   if (typeof val === 'number') el.value = val;
   else el.value = val;
+}
+
+/* 秒 → m:ss (超过一小时则 h:mm:ss)。定时模式的倒计时用 */
+function fmtCountdown(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  function p(n) { return (n < 10 ? '0' : '') + n; }
+  return h > 0 ? (h + ':' + p(m) + ':' + p(s)) : (m + ':' + p(s));
 }
 
 function connectHTTP() {
@@ -317,6 +327,7 @@ function sendCmd(cmd, params = {}) {
   if (params.slot !== undefined) url += '&s=' + params.slot;
   if (params.mode !== undefined) url += '&m=' + params.mode;
   if (params.index !== undefined) url += '&i=' + params.index;
+  if (params.flow !== undefined) url += '&f=' + params.flow;
 
   fetch(url).then(r => r.json()).then(d => {
     if (!d || !d.ok) {
@@ -347,13 +358,37 @@ function handlePauseResume() {
 function updateUI(d) {
   currentState = d.state;
   currentMode = d.mode;
+  /* 校准向导期间主面板要锁住编辑 (固件同样会拒绝); 但模式与日常参数本身不受校准影响 */
+  var inCalib = (d.menu === 'CALIBRATE');
   $('#stState').textContent = d.state;
   $('#stMode').textContent = d.mode;
   $('#stFlow').textContent = d.flow.toFixed(1);
   $('#stDisp').textContent = d.dispensed.toFixed(2);
-  $('#stTarget').textContent = d.targetVol.toFixed(1);
-  $('#progressBar').style.width = d.progress + '%';
-  $('#stProgress').textContent = d.progress + '%';
+
+  /* 进度区: 定时模式显示倒计时; 校准向导期间一律按校准体积显示 ——
+     校准不改 pump.mode, 用户此刻可能正处在 TIME 模式, 那个倒计时对本次校准没有意义 */
+  var barPct = d.progress;
+  if (inCalib) {
+    $('#stProgress').textContent = d.progress + '%';
+    $('#stTargetLabel').textContent = '校准目标';
+    $('#stTarget').textContent = (d.calibTargetVol || 0).toFixed(1);
+    $('#stTargetUnit').textContent = 'mL';
+  } else if (d.mode === 'TIME') {
+    var totalSec = d.targetTime || 0;
+    var leftSec = Math.max(0, totalSec - (d.elapsed || 0));
+    barPct = (d.state === 'DONE') ? 100
+      : (totalSec > 0 ? Math.min(100, Math.round((d.elapsed || 0) / totalSec * 100)) : 0);
+    $('#stProgress').textContent = (d.state === 'DONE') ? '已完成' : ('⏳ 剩余 ' + fmtCountdown(leftSec));
+    $('#stTargetLabel').textContent = '目标';
+    $('#stTarget').textContent = totalSec.toFixed(0);
+    $('#stTargetUnit').textContent = 's';
+  } else {
+    $('#stProgress').textContent = d.progress + '%';
+    $('#stTargetLabel').textContent = '目标';
+    $('#stTarget').textContent = d.targetVol.toFixed(1);
+    $('#stTargetUnit').textContent = 'mL';
+  }
+  $('#progressBar').style.width = barPct + '%';
   /* JET 模式运行状态 */
   var jetInfo = $('#stJetInfo');
   if (d.mode === 'JET' && d.state !== 'IDLE' && d.state !== 'DONE') {
@@ -401,12 +436,31 @@ function updateUI(d) {
 
   $$('.mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === d.mode));
 
+  /* 校准向导期间锁定主面板的日常参数编辑与启动键
+     (固件同样拒绝 set_mode / set_flow / set_volume / set_time / set_liquid / start),
+     停止和暂停保留可用 */
+  ['inFlow', 'inVolume', 'inTimeVol', 'inTimeSec',
+   'inJetVol', 'inJetInt', 'inJetFlow', 'inJetPres'].forEach(function (id) {
+    var el = $('#' + id);
+    if (el) {
+      el.disabled = inCalib;
+      el.title = inCalib ? '校准期间锁定；校准用的体积/流量在向导第 2 步设定，不影响这里' : '';
+    }
+  });
+  /* 液体行由 buildLiquidRow() 重建, 所以每次轮询都重新上一遍锁 */
+  $$('.liquid-btn').forEach(function (b) {
+    b.style.opacity = inCalib ? '.45' : '';
+    b.style.pointerEvents = inCalib ? 'none' : '';
+    b.title = inCalib ? '校准期间液体由向导第 1 步决定，保存后才生效' : '';
+  });
+
   const isIdle = d.state === 'IDLE';
   const isRunning = d.state === 'RUNNING';
   const isPaused = d.state === 'PAUSED';
   const isDone = d.state === 'DONE';
 
-  $('#btnStart').disabled = !(isIdle || isDone);
+  $('#btnStart').disabled = inCalib || !(isIdle || isDone);
+  $('#btnStart').title = inCalib ? '校准期间请用向导里的「启动运行」' : '';
   $('#btnStop').disabled = !(isRunning || isPaused);
 
   if (isPaused) {
@@ -426,6 +480,8 @@ function updateUI(d) {
   if (d.calibStep !== undefined && d.calibStep >= 0) {
     var uiStep = d.calibStep - 1;
     if (d.calibTargetVol !== undefined) lastCalibTargetVol = d.calibTargetVol;
+    if (d.calibFlow !== undefined) lastCalibFlow = d.calibFlow;
+    if (d.calibLiquid !== undefined) lastCalibLiquid = d.calibLiquid;
     if (uiStep !== currentStep) {
       updateCalibSteps(uiStep);
     }
@@ -434,9 +490,19 @@ function updateUI(d) {
       var pb = $('#calibRunProgress');
       if (pb) pb.style.width = d.progress + '%';
       var cd = $('#calibRunDisp');
-      if (cd) cd.textContent = d.dispensed.toFixed(1) + ' / ' + d.targetVol.toFixed(1) + ' mL';
+      /* 分母用 calibTargetVol: 固件已不再把校准体积写进 targetVolume
+         (那字段会落盘, 写进去会让 calibSave 把用户的日常目标体积也改掉) */
+      if (cd) cd.textContent = d.dispensed.toFixed(1) + ' / ' + (d.calibTargetVol || 0).toFixed(1) + ' mL';
     }
   }
+
+  /* 模式标签在校准期间不可点 (inCalib 上面已算好, 固件也会拒绝 set_mode)。
+     校准不会改模式: 退出向导后这里高亮的还是你原来选的那个 */
+  $$('.mode-tab').forEach(function (t) {
+    t.style.opacity = inCalib ? '.45' : '';
+    t.style.pointerEvents = inCalib ? 'none' : '';
+    t.title = inCalib ? '校准期间不可切换模式；校准不会改动你的模式设定' : '';
+  });
 
   if (d.wifiMode) {
     /* AP 直连地址 — 始终可用 */
@@ -525,19 +591,25 @@ function updateCalibSteps(step) {
   switch (step) {
     case 0:
       content.innerHTML = '<p style="color:var(--text2);margin-bottom:8px">第 1/5 步: 选择要校准的液体</p>'
-        + liquidNames.map((n, i) => '<button class="btn-action" style="flex:1;margin:2px" onclick="sendCmd(\'calib_select_liquid\',{index:' + i + '})">' + n + '</button>').join('');
+        + liquidNames.map((n, i) => '<button class="btn-action" style="flex:1;margin:2px" onclick="sendCmd(\'calib_select_liquid\',{index:' + i + '})">' + n + '</button>').join('')
+        + '<p style="color:var(--text3);font-size:11px;margin-top:6px;line-height:1.5">只对本次校准生效；走到第 5 步保存后才会切换日常液体，中途放弃则一切不变。</p>';
       b1.textContent = ''; b1.onclick = null; b1.style.display = 'none';
       b2.textContent = ''; b2.onclick = null; b2.style.display = 'none';
       break;
     case 1:
-      content.innerHTML = '<p style="color:var(--text2)">第 2/5 步: 设定校准体积</p><input type="number" id="calibVol" value="' + lastCalibTargetVol + '" step="0.1" min="0.1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:14px;margin-top:6px">';
-      b1.textContent = '确认体积'; b1.onclick = () => sendCmd('calib_set_vol', {value:parseFloat($('#calibVol')?.value||10)});
+      content.innerHTML = '<p style="color:var(--text2)">第 2/5 步: 设定校准体积与流量</p>'
+        + '<div class="input-row"><label>体积</label><input type="number" id="calibVol" value="' + lastCalibTargetVol + '" step="0.1" min="0.1" max="99999"><span class="unit">mL</span></div>'
+        + '<div class="input-row"><label>流量</label><input type="number" id="calibFlow" value="' + lastCalibFlow + '" step="1" min="0.1" max="1600"><span class="unit">mL/min</span></div>'
+        + '<p style="color:var(--text3);font-size:11px;margin-top:6px;line-height:1.5">这里的体积和流量只作用于本次校准：不改日常的流量 / 体积设定，不改液体选择，也不切换你的模式。校准期间不可切模式，退出向导即恢复操作。</p>';
+      b1.textContent = '确认'; b1.onclick = () => sendCmd('calib_set_vol', {value:parseFloat($('#calibVol')?.value||10), flow:parseFloat($('#calibFlow')?.value||50)});
       b2.textContent = '跳过'; b2.onclick = () => sendCmd('calib_abort');
       break;
     case 2:
       content.innerHTML = '<p style="color:var(--text2)">第 3/5 步: 泵正在运行中...</p>'
         + '<div class="progress-bar" style="margin:10px 0"><div class="progress-fill" id="calibRunProgress" style="width:0%"></div></div>'
         + '<div style="text-align:center;font-size:12px;color:var(--text2)" id="calibRunDisp">-- / -- mL</div>'
+        + '<div style="text-align:center;font-size:11px;color:var(--text3);margin-top:4px">'
+        + (liquidNames[lastCalibLiquid] || '') + ' · 本次流量 ' + lastCalibFlow + ' mL/min</div>'
         + '<p style="color:var(--accent);font-size:13px;margin-top:8px">可手动停止或等它自动完成</p>';
       b1.textContent = '启动运行'; b1.onclick = () => sendCmd('calib_start_run');
       b2.textContent = '手动停止'; b2.onclick = () => sendCmd('calib_stop_run');
@@ -589,7 +661,8 @@ function wifiScan() {
         wifiScanTimer = null;
         var nets = d.networks || [];
         if (nets.length === 0) {
-          $('#wifiScanResult').textContent = '未发现 WiFi 网络';
+          /* 泵忙时固件回 {ok:false,error:"Pump busy",done:true} —— 不能显示成「没搜到」 */
+          $('#wifiScanResult').textContent = d.error ? ('⚠ ' + d.error) : '未发现 WiFi 网络';
           return;
         }
         $('#wifiScanResult').innerHTML = nets.map(function(n) {

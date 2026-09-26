@@ -69,6 +69,10 @@ const char* parseAndExecute( const char* json ) {
 
   if ( strcmp( cmd, "start" ) == 0 ) {
     if ( pump.state != STATE_IDLE && pump.state != DONE ) return errResponse( cmd, "Pump not idle" );
+    // 校准向导里必须走 calib_start_run: start 用的是日常的 flowRate/targetVolume,
+    // 而 calibStep 还停在 CALIB_RUN, 随后 calib_start_run 又会重新 moveTo, 校准步数就废了
+    if ( pump.currentMenu == CALIBRATE )
+      return errResponse( cmd, "Use calib_start_run during calibration" );
     if ( pump.mode == MODE_JET ) startJetCycle();
     else startPump();
     return okResponse( cmd );
@@ -87,8 +91,12 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "stop" ) == 0 || strcmp( cmd, "reset" ) == 0 ) {
-    if ( pump.state == RUNNING || pump.state == PAUSED ) stopPump();
-    if ( pump.mode == MODE_JET ) stopJetCycle();
+    // 校准运行中要走 calibStopRun(): 它才会清 calibRunning, 否则电机停了但
+    // 遥测仍按 calibTargetVol 算进度, 向导也一直卡在「运行中」那一步
+    if ( pump.calibRunning ) calibStopRun();
+    else if ( pump.state == RUNNING || pump.state == PAUSED ) stopPump();
+    // 校准运行时不碰喷射逻辑: 用户的 mode 可能就是 JET, 但这次运行与喷射无关
+    if ( pump.mode == MODE_JET && !pump.calibRunning ) stopJetCycle();
     resetPump();
     pump.jetCount = 0;
     return okResponse( cmd );
@@ -101,6 +109,11 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "set_mode" ) == 0 ) {
     if ( pump.state != STATE_IDLE && pump.state != DONE )
       return errResponse( cmd, "Cannot change mode while running" );
+    // 校准向导期间不允许切模式: 下面那句 currentMenu=MAIN + resetPump() 会把向导打断,
+    // 正在跑的校准电机也就失去 calibRunning 的看护 (tick_running 靠它选用哪套逻辑)。
+    // 校准本身并不改 pump.mode —— 退出向导后模式仍是用户原来那个
+    if ( pump.currentMenu == CALIBRATE )
+      return errResponse( cmd, "Cannot change mode during calibration" );
     const char* modeStr = params["mode"] | "";
     if ( strcmp( modeStr, "VOLUME" ) == 0 || strcmp( modeStr, "volume" ) == 0 )
       pump.mode = MODE_VOLUME;
@@ -118,6 +131,10 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "set_liquid" ) == 0 ) {
+    // 校准向导自己管液体 (calibLiquid), 日常的液体选择在此期间冻结:
+    // 换液体会同时改 stepsPerMl, 而校准运行正用 calibSPM() 算步数
+    if ( pump.currentMenu == CALIBRATE )
+      return errResponse( cmd, "Cannot change liquid during calibration" );
     int idx = params["index"] | -1;
     if ( idx < 0 || idx >= NUM_LIQUIDS ) return errResponse( cmd, "Invalid liquid index ( 0-3 )" );
     selectLiquid( idx );
@@ -133,6 +150,13 @@ const char* parseAndExecute( const char* json ) {
   // ===================================================================
 
   if ( strcmp( cmd, "set_flow" ) == 0 ) {
+    // 校准向导期间拒绝改日常参数 (set_flow / set_volume / set_time 同理):
+    // 这三个命令结尾都会把 currentMenu 打回 MAIN, 等于悄悄退出向导,
+    // 正在跑的校准电机也就没人管了 (calibRunning 还留着)。
+    // 校准自己的体积和流量走 calib_set_vol (calibTargetVol / calibFlowRate),
+    // 它们与 flowRate / targetVolume 是两套字段, 互不覆写
+    if ( pump.currentMenu == CALIBRATE )
+      return errResponse( cmd, "Cannot change flow during calibration" );
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 0.1 || val > 1600.0 )
       return errResponse( cmd, "Value out of range ( 0.1 - 1600 )" );
@@ -145,6 +169,8 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "set_volume" ) == 0 ) {
+    if ( pump.currentMenu == CALIBRATE )   // 见 set_flow 处的说明
+      return errResponse( cmd, "Cannot change volume during calibration" );
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 0.1 || val > 99999 )
       return errResponse( cmd, "Value out of range ( 0.1 - 99999 )" );
@@ -156,6 +182,8 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "set_time" ) == 0 ) {
+    if ( pump.currentMenu == CALIBRATE )   // 见 set_flow 处的说明
+      return errResponse( cmd, "Cannot change time during calibration" );
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 1 || val > 86400 )
       return errResponse( cmd, "Value out of range ( 1 - 86400 )" );
@@ -240,10 +268,14 @@ const char* parseAndExecute( const char* json ) {
       return errResponse( cmd, "Not at calib liquid selection step" );
     int idx = params["index"] | -1;
     if ( idx < 0 || idx >= NUM_LIQUIDS ) return errResponse( cmd, "Invalid liquid index ( 0-3 )" );
-    pump.currentLiquid = idx;
+    // 只写 calibLiquid: 日常的 currentLiquid / stepsPerMl 要等 calib_save 才提交,
+    // 中途 calib_abort 的话用户原来的液体选择一点不变
+    pump.calibLiquid = idx;
     pump.calibStep = CALIB_SET_VOL;
     beepConfirm();
-    return okResponse( cmd );
+    char ldata[64];
+    snprintf( ldata, sizeof( ldata ), "{\"calibLiquid\":%d,\"name\":\"%s\"}", idx, LIQUID_NAMES[ idx ] );
+    return okResponse( cmd, ldata );
   }
 
   if ( strcmp( cmd, "calib_set_vol" ) == 0 ) {
@@ -254,10 +286,20 @@ const char* parseAndExecute( const char* json ) {
     float val = params["value"] | NAN;
     if ( isnan( val ) || val < 0.1 || val > 99999 )
       return errResponse( cmd, "Volume out of range ( 0.1 - 99999 )" );
+    // 可选: 一并设定本次校准的流量。写入 calibFlowRate 而不是 flowRate,
+    // 免得校准用的高速污染用户日常设定 (校准 1500 mL 时尤其需要单独提速)。
+    // 两个值都校验通过再一起写 —— 否则流量非法时报了错, 体积却已经改了一半
+    float f = params["flow"] | NAN;
+    if ( !isnan( f ) && ( f < 0.1 || f > 1600.0 ) )
+      return errResponse( cmd, "Calib flow out of range ( 0.1 - 1600 )" );
     pump.calibTargetVol = constrain( val, 0.1f, 99999.0f );
+    if ( !isnan( f ) ) pump.calibFlowRate = constrain( f, 0.1f, 1600.0f );
     pump.calibStep = CALIB_RUN;
     beepConfirm();
-    return okResponse( cmd );
+    char cdata[128];
+    snprintf( cdata, sizeof( cdata ), "{\"calibTargetVol\":%.1f,\"calibFlow\":%.1f}",
+              pump.calibTargetVol, pump.calibFlowRate );
+    return okResponse( cmd, cdata );
   }
 
   if ( strcmp( cmd, "calib_start_run" ) == 0 ) {
@@ -288,7 +330,7 @@ const char* parseAndExecute( const char* json ) {
     pump.calibStep = CALIB_RESULT;
     beepConfirm();
     char data[128];
-    snprintf( data, sizeof( data ), "{\"oldSPM\":%.1f,\"newSPM\":%.1f}", pump.stepsPerMl, pump.calibNewSPM );
+    snprintf( data, sizeof( data ), "{\"oldSPM\":%.1f,\"newSPM\":%.1f}", calibSPM(), pump.calibNewSPM );
     return okResponse( cmd, data );
   }
 
@@ -304,10 +346,9 @@ const char* parseAndExecute( const char* json ) {
   }
 
   if ( strcmp( cmd, "calib_abort" ) == 0 ) {
-    pump.currentMenu = MAIN;
-    pump.calibStep = CALIB_IDLE;
     pump.calibRunning = false;
     if ( pump.state == RUNNING ) stopPump();
+    calibLeave();          // 只清菜单和步骤 —— 日常设定从来没被校准改过
     beepCancel();
     return okResponse( cmd );
   }
@@ -315,8 +356,7 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "calib_settings_done" ) == 0 ) {
     if ( pump.currentMenu != CALIBRATE || pump.calibStep != CALIB_SETTINGS )
       return errResponse( cmd, "Not at calib settings step" );
-    pump.currentMenu = MAIN;
-    pump.calibStep = CALIB_IDLE;
+    calibLeave();
     beepConfirm();
     return okResponse( cmd );
   }
@@ -351,6 +391,8 @@ const char* parseAndExecute( const char* json ) {
 
   if ( strcmp( cmd, "prime_start" ) == 0 ) {
     if ( pump.state != STATE_IDLE ) return errResponse( cmd, "Pump not idle" );
+    if ( pump.currentMenu == CALIBRATE )   // 会把菜单改成 PRIME, 向导和强制的 VOLUME 模式就都回不来了
+      return errResponse( cmd, "Cannot prime during calibration" );
     pump.currentMenu = PRIME;
     ensureStepperOn();
     applySpeed( flowRateToPPS( 1500.0 ), flowRateToPPS( 1500.0 ) );
@@ -376,8 +418,10 @@ const char* parseAndExecute( const char* json ) {
   // ===================================================================
 
   if ( strcmp( cmd, "menu_main" ) == 0 ) {
-    pump.currentMenu = MAIN;
-    pump.calibStep = CALIB_IDLE;
+    // 从校准菜单返回也统一走 calibLeave(), 并停掉可能还在跑的校准电机
+    if ( pump.calibRunning ) calibStopRun();
+    if ( pump.currentMenu == CALIBRATE ) calibLeave();
+    else { pump.currentMenu = MAIN; pump.calibStep = CALIB_IDLE; }
     beepCancel();
     return okResponse( cmd );
   }
@@ -448,15 +492,23 @@ const char* buildTelemetryJson() {
 
   // 进度百分比
   int progress = 0;
-  if ( ( pump.state == RUNNING || pump.state == PAUSED || pump.state == DONE ) && pump.targetVolume > 0 ) {
-    progress = ( int )( pump.dispensedVolume / pump.targetVolume * 100 );
-    if ( progress > 100 ) progress = 100;
+  if ( pump.state == RUNNING || pump.state == PAUSED || pump.state == DONE ) {
+    // 校准运行时分母用 calibTargetVol —— calibStartRun() 不再覆写 targetVolume
+    // (那个字段会落盘, 覆写它会让 calibSave() 把校准体积误存成用户的目标体积)
+    float denom = pump.calibRunning ? pump.calibTargetVol : pump.targetVolume;
+    if ( denom > 0 ) {
+      progress = ( int )( pump.dispensedVolume / denom * 100 );
+      if ( progress > 100 ) progress = 100;
+    }
   }
 
-  // 已运行秒数
+  // 已运行秒数。PAUSED 报冻结的 pumpElapsed 而不是 0 —— TIME 模式的倒计时靠它,
+  // 报 0 会让剩余时间在一按暂停时跳回满值
   unsigned long elapsed = 0;
   if ( pump.state == RUNNING )
     elapsed = ( millis() - pump.pumpStartMs ) / 1000;
+  else if ( pump.state == PAUSED )
+    elapsed = pump.pumpElapsed;
 
   // 管路寿命百分比
   int tubePct = ( pump.tubeLifeML > 0 ) ? ( int )( pump.totalDispensed / pump.tubeLifeML * 100 ) : 0;
@@ -479,6 +531,8 @@ const char* buildTelemetryJson() {
     "\"flow\":%.1f,"
     "\"targetVol\":%.1f,"
     "\"calibTargetVol\":%.1f,"
+    "\"calibFlow\":%.1f,"
+    "\"calibLiquid\":%d,"
     "\"targetTime\":%.1f,"
     "\"dispensed\":%.2f,"
     "\"elapsed\":%lu,"
@@ -506,7 +560,7 @@ const char* buildTelemetryJson() {
     ( unsigned long )millis(),
     stateStr, menuStr, modeStr,
     LIQUID_NAMES[ pump.currentLiquid ], pump.currentLiquid,
-    pump.flowRate, pump.targetVolume, pump.calibTargetVol, pump.targetTime,
+    pump.flowRate, pump.targetVolume, pump.calibTargetVol, pump.calibFlowRate, pump.calibLiquid, pump.targetTime,
     pump.dispensedVolume, elapsed, progress,
     pump.totalDispensed, tubePct, pump.tubeLifeML,
     ( pump.mode == MODE_JET ) ? pump.jetCount : 0,
