@@ -1,89 +1,32 @@
-# 📦 蠕动泵控制器 — YZ1515 精密点液 / 喷射工作站（DM542 版）
+# 蠕动泵控制器 — YZ1515 精密点液 / 喷射工作站（DM542 版）
 
+> `master` = **DM542 驱动版本，v2.3.8**，本仓库唯一的分支。
 >
 > 2026-09-26 对本分支做过一次**维护性审查**（修构建阻塞 + 删死代码 + 修 16 处缺陷），
-> 不是功能开发。详见 [§6 代码审查记录](#6-代码审查记录-2026-09-26) 与 [§7 更新日志](#7-更新日志)。
+> 详见 [§5 代码审查记录](#5-代码审查记录-2026-09-26) 与 [§6 更新日志](#6-更新日志)。
 
 基于 ESP32-S3 的蠕动泵控制器，驱动 YZ1515 工业泵头，实现**体积 / 时间 / 喷射**三种模式的
 精密流体控制。步进驱动为 **DM542 数字驱动器 + 6N137 光耦隔离**，控制端为内嵌 Web UI
 （手机 PWA）+ USB 串口 + 硬件 UART 三通道 JSON 协议。
 
-| 版本 | 分支 | 驱动 | 状态 |
-|------|------|------|------|
-| **v2.5.2** | **[`tmc2226`](https://github.com/784318839-stack/peristaltic-pump/tree/tmc2226)** | TMC2226 + CoolStep + StealthChop | ✅ 活跃开发 |
-| v2.3.8 | `master`（本分支） | DM542 + 6N137 光耦 | 📦 归档（2026-07-30；2026-09-26 维护一次） |
-
-> **为什么两边对"堵转检测"的处理相反？** DM542 是开环驱动，没有位置/堵转反馈能力，
-> 本分支用「位置 N 秒不变」推断堵转本身就不可靠（见 [A2](#a-组已修复的缺陷)），故整体删除。
-> `tmc2226` 分支用 TMC2226 的**硬件 StallGuard** 重新实现了堵转保护（`6cbcf8b` v2.5.0，
-> `27ce8eb` 修通信失败误判）。两者不矛盾，是硬件能力不同。
+> **本分支为什么没有堵转检测？** DM542 是开环驱动，没有位置 / 堵转反馈能力，
+> 用「位置 N 秒不变」推断堵转本身不可靠 —— 实测会在正常启动时误报（见
+> [A2](#a-组已修复的缺陷)），故 2026-09-26 整体删除。
 
 ---
 
 ## 目录
 
-1. [待办：回移到 tmc2226 的修复](#1-待办回移到-tmc2226-的修复)
-2. [硬件](#2-硬件)
-3. [功能](#3-功能)
-4. [控制接口](#4-控制接口)
-5. [构建与烧录](#5-构建与烧录)
-6. [代码审查记录 (2026-09-26)](#6-代码审查记录-2026-09-26)
-7. [更新日志](#7-更新日志)
+1. [硬件](#1-硬件)
+2. [功能](#2-功能)
+3. [控制接口](#3-控制接口)
+4. [构建与烧录](#4-构建与烧录)
+5. [代码审查记录 (2026-09-26)](#5-代码审查记录-2026-09-26)
+6. [更新日志](#6-更新日志)
 
 ---
 
-## 1. 待办：回移到 tmc2226 的修复
-
-2026-09-26 的审查在本分支修好了 16 处缺陷，其中 **4 项经 `git grep` 确认 `tmc2226`
-（截至 `b337b3b`）仍然缺失**。这是本 README 里唯一还有行动价值的部分。
-
-| 编号 | 问题 | `tmc2226` 现状 |
-|---|---|---|
-| **A3** | 低速分液时电机不动，却上报「已分液 X mL」 | `pump_core.cpp:15-16`、`pump_core.cpp:90-91`、`pump_machine.cpp:84-85`、`command_protocol.cpp:366-367` 四处仍是裸 `setSpeedInHz((uint32_t)pps)` / `setAcceleration((int)…)`，无返回值检查、无 millHz 兜底。`setSpeedInMilliHz` / `applySpeed` 零命中 |
-| **A8** | `constrain()` 挡不住 NaN | `isfinite` / `clampF` 零命中（该分支 `eeprom_store.cpp` 的校验方式需另行确认） |
-| **A14** | 硬件 UART RX 环形缓冲默认 256 B < 单帧 1024 B | `setRxBufferSize` 零命中 |
-| **A18** | TIME 模式覆写 `flowRate`，跑完后 UI 显示用户没设过的值 | `activeFlowRate` 零命中 |
-
-### A3 的完整机理（最严重的一个）
-
-FastAccelStepper 1.2.7，均已在其源码中核实：
-
-```
-setSpeedInHz(0)          -> return -1，速度保持原值      (FastAccelStepper.cpp:657-660)
-setAcceleration(<= 0)    -> return -1，加速度保持原值    (fas_ramp/RampGenerator.cpp:19-22)
-RampCalculator::init()   -> memset(this, 0, ...)，故 valid_speed / valid_acceleration = false
-                                                          (fas_ramp/RampCalculator.h:63)
-checkValidConfig()       -> MOVE_ERR_SPEED_IS_UNDEFINED  (fas_ramp/RampCalculator.h:136-144)
-```
-
-于是 `moveTo()` 直接失败，**一个脉冲都不发**；而状态机看到 `isRunning() == false`
-就判定运行完成，执行 `dispensedVolume = targetVolume` 并把 `totalDispensed` 累加进管路寿命。
-UI 显示「已分液 10.0 mL」，实际一滴未出。
-
-触发条件 `pps = flowRate × stepsPerMl / 60 < 1`：
-
-- 250 stepsPerMl 下即 `flowRate < 0.24 mL/min`
-- 而 Web UI 的 `min`、固件 `set_flow` 的下限、`loadParams()` 的 `constrain` **全都是 0.1**，完全可输入
-- TIME 模式更容易踩：`0.1 mL / 60 s` 反算即 0.1 mL/min
-
-本分支的修法（见 `pump_core.cpp::applySpeed()`）：改用 `setSpeedInMilliHz()` 而非抬高流量下限，
-这样 0.1 mL/min 的慢速分液仍然可用。有效区间已核对：库下限 5 millHz
-（`1000 × TICKS_PER_S / 0xffffffff + 1`），本项目最低 `pps = 0.1 × 10 / 60 = 0.0167 Hz = 16.7 millHz`；
-上限 `250 × TICKS_PER_S = 4e9` 不溢出 `uint32`，最高 `pps` 1.33 MHz → 1.33e9 millHz。
-加速度下限钳到 1，两个调用的返回值都检查，失败时打印 `[PUMP] applySpeed rejected`。
-
-### 已在 tmc2226 上做过的，不要重复劳动
-
-| commit | 内容 | 对应本分支编号 |
-|---|---|---|
-| `d136764` | v2.4.1 移除堵转检测与 BLE，修 WiFi 热点名与扫描断连 | A2 / A19 |
-| `16d4c47` | 暂停恢复过冲、预灌停止卡死、参数保护、WiFi 保存双重重启 | A5 / A10 |
-| `8a0514e` | v2.5.1 SoftAP 不广播 / STA 永不重连 / mDNS（`MDNS.end` 已有） | A9 |
-| `8e4bcb1` | 校准 / 时间模式 / HTTP 六项修复（`Content-Length` 已有） | A6 / A11 部分 |
-
----
-
-## 2. 硬件
+## 1. 硬件
 
 ### 部件
 
@@ -143,7 +86,7 @@ ESP32 GND ──────────── DIR-
 
 ---
 
-## 3. 功能
+## 2. 功能
 
 ### 泵送模式
 
@@ -196,11 +139,11 @@ ESP32 GND ──────────── DIR-
 - **管路寿命追踪** — 累计流量统计，达到设定值时 LED 红灯告警（`tubeLifeML = 0` 表示禁用）
 
 > 本分支**没有**堵转检测、没有自动关使能（ENA 未接线，`stepperEnabled` 恒为 true）、
-> 没有 BLE。三者都曾在文档里出现过，实际要么从未实现、要么已删除，详见 §6。
+> 没有 BLE。三者都曾在文档里出现过，实际要么从未实现、要么已删除，详见 §5。
 
 ---
 
-## 4. 控制接口
+## 3. 控制接口
 
 三个通道共用同一套 JSON 命令协议，全部在 `loop()` 单线程内**串行**执行
 （`processSerialCommands` → `processHardwareUart` → `handleWebClients` → `pump_machine_tick`），
@@ -229,7 +172,7 @@ ESP32 GND ──────────── DIR-
 
 > ⚠️ **整个 HTTP API 没有鉴权**，同网段任何人都能启停泵、改校准、改 WiFi 配置；
 > SoftAP 密码是全设备统一的硬编码值。XOR 只是混淆不是加密（密钥是 eFuse MAC）。
-> 见 [§6 B 组](#b-组需产品决策未擅自改动)。
+> 见 [§5 B 组](#b-组需产品决策未擅自改动)。
 
 ### Web UI
 
@@ -328,7 +271,7 @@ header 显示当前可访问地址 · STA 连接成功自动弹提示
 - `liquid`：`Wtr` / `Thk` / `Liq1` / `Liq2`
 - `wifiMode`：`ap` 或 `sta+ap`
 - `heapTotal` 是 `ESP.getHeapSize()` 实测值；`psram*` / `heap*` 单位 KB
-- `stepperEnabled` 恒为 `true`（见 §6 B3）
+- `stepperEnabled` 恒为 `true`（见 §5 B3）
 
 ### 状态机
 
@@ -352,7 +295,7 @@ Mode: MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 
 ---
 
-## 5. 构建与烧录
+## 4. 构建与烧录
 
 ### Arduino IDE 配置
 
@@ -466,7 +409,7 @@ python peristaltic_pump/generate_web_ui.py
 
 ---
 
-## 6. 代码审查记录 (2026-09-26)
+## 5. 代码审查记录 (2026-09-26)
 
 对本分支做的一次完整审查。三个 commit：
 
@@ -484,7 +427,7 @@ python peristaltic_pump/generate_web_ui.py
 |---|---|---|
 | **A1** | **工程完全无法编译** —— `.ino` 已移入子目录而 24 个 `.cpp/.h` 仍在仓库根 | 全部移入 `peristaltic_pump/`（`fa4cbee`） |
 | **A2** | 体积/时间模式一启动就误报堵转：`stallCheckTime` 初值 0 且从不重置，进 loop 时 `millis() ≥ 2400` 使 `millis()-0 > 1500` 恒真；而 `getCurrentPosition()` 返回 PCNT 实发脉冲数，`moveTo()` 后首帧仍为 0 | 整体删除堵转检测（DM542 无反馈能力，见 `523a773`） |
-| **A3** | **低速时电机不动却上报「已分液 X mL」** | `applySpeed()` 统一入口 + `setSpeedInMilliHz()` + 检查返回值。详见 [§1](#1-待办回移到-tmc2226-的修复) |
+| **A3** | **低速时电机不动却上报「已分液 X mL」** | `applySpeed()` 统一入口 + `setSpeedInMilliHz()` + 检查返回值。完整机理见[下文](#a3-的完整机理最严重的一个) |
 | **A4** | `stepperConnectToPin()` 失败 → 紧随其后的 `updateStepperSpeed()` 解引用空指针 → 崩溃重启循环 | setup 里打印 FATAL 并停在 `for(;;)` |
 | **A5** | 暂停后恢复多打约 0.13 mL（1600 Hz 下 `forceStop()` 需约 20 ms 才真停，队列内命令仍会走完） | `forceStop()` 后轮询 `isRunning()` 到 false，上限 200 ms |
 | **A6** | 校准可把 `stepsPerMl` 存成 0（`calibCalculate()` 静默失败但 `calib_measure` 仍返回 `ok:true`） | `calibCalculate()` 返回 `bool`，三层校验 |
@@ -514,6 +457,34 @@ python peristaltic_pump/generate_web_ui.py
 `g_lastWifiCli` / `g_lastBleConn` / `g_lastEnabled`、`Menu` 枚举 9 个不可达值、
 `build_web_ui.py`（输出路径硬编码指向另一个旧项目副本）、`data/www/index.html`
 （代码里无 LittleFS/SPIFFS）。
+
+### A3 的完整机理（最严重的一个）
+
+FastAccelStepper 1.2.7，均已在其源码中核实：
+
+```
+setSpeedInHz(0)          -> return -1，速度保持原值      (FastAccelStepper.cpp:657-660)
+setAcceleration(<= 0)    -> return -1，加速度保持原值    (fas_ramp/RampGenerator.cpp:19-22)
+RampCalculator::init()   -> memset(this, 0, ...)，故 valid_speed / valid_acceleration = false
+                                                          (fas_ramp/RampCalculator.h:63)
+checkValidConfig()       -> MOVE_ERR_SPEED_IS_UNDEFINED  (fas_ramp/RampCalculator.h:136-144)
+```
+
+于是 `moveTo()` 直接失败，**一个脉冲都不发**；而状态机看到 `isRunning() == false`
+就判定运行完成，执行 `dispensedVolume = targetVolume` 并把 `totalDispensed` 累加进管路寿命。
+UI 显示「已分液 10.0 mL」，实际一滴未出。
+
+触发条件 `pps = flowRate × stepsPerMl / 60 < 1`：
+
+- 250 stepsPerMl 下即 `flowRate < 0.24 mL/min`
+- 而 Web UI 的 `min`、固件 `set_flow` 的下限、`loadParams()` 的 `constrain` **全都是 0.1**，完全可输入
+- TIME 模式更容易踩：`0.1 mL / 60 s` 反算即 0.1 mL/min
+
+修法（见 `pump_core.cpp::applySpeed()`）：改用 `setSpeedInMilliHz()` 而非抬高流量下限，
+这样 0.1 mL/min 的慢速分液仍然可用。有效区间已核对：库下限 5 millHz
+（`1000 × TICKS_PER_S / 0xffffffff + 1`），本项目最低 `pps = 0.1 × 10 / 60 = 0.0167 Hz = 16.7 millHz`；
+上限 `250 × TICKS_PER_S = 4e9` 不溢出 `uint32`，最高 `pps` 1.33 MHz → 1.33e9 millHz。
+加速度下限钳到 1，两个调用的返回值都检查，失败时打印 `[PUMP] applySpeed rejected`。
 
 ### B 组：需产品决策，未擅自改动
 
@@ -570,23 +541,23 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 
 ---
 
-## 7. 更新日志
+## 6. 更新日志
 
 > 2026-09-26 之前的条目记录的是**当时**的代码状态。其中若干机制此后已被移除或改正
 > （FreeRTOS 命令队列、`/api/info`、STA 30 s 超时、3 秒堵转检测、"RMT 迁移"），
-> 阅读时请以 §3–§5 的当前描述为准。
+> 阅读时请以 §2–§4 的当前描述为准。
 
-### 2026-09-26 — 维护性审查（归档后例外）
+### 2026-09-26 — 维护性审查
 
 修复构建阻塞（A1）、低速分液静默失败（A3）、启动空指针（A4）等 16 处缺陷；
 删除 BLE、堵转检测与全部死代码（−1472 行）；清理两个文件的有损 mojibake；
 README 全面重写。三个 commit：`fa4cbee` / `523a773` / `b024a6e`，
 每个都单独编译验证，最终固件 1046196 bytes (33%)、内部 SRAM 静态 52840 bytes (16%)、
-本项目代码零警告。详见 [§6](#6-代码审查记录-2026-09-26)。
+本项目代码零警告。详见 [§5](#5-代码审查记录-2026-09-26)。
 
 ### v2.3.8 (2026-07-30)
 
-- DM542 分支归档，TMC2226 版本独立维护于 `tmc2226` 分支
+- DM542 分支标记归档
 - 删除方案预设功能（净减 212 行）
 
 ### v2.3.6 (2026-07-21) — UART 串口通信修复
