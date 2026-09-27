@@ -146,6 +146,7 @@ def main():
     p_ad.add_argument("value", type=float)
     p_tl = sub.add_parser("set_tube_life", help="设置管路寿命 mL (0=不提醒)")
     p_tl.add_argument("value", type=float)
+    sub.add_parser("reset_tube_life", help="累计流量清零 (换管后用; 不改寿命阈值)")
 
     # 校准向导
     sub.add_parser("calib_enter", help="进入校准向导")

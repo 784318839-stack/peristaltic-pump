@@ -385,6 +385,18 @@ const char* parseAndExecute( const char* json ) {
     return okResponse( cmd );
   }
 
+  //  totalDispensed 原本只增不减 ( 4 处写入全是 += , resetPump() 也不碰它 ),
+  //  于是换完管子 tubePct 与 led.cpp 的 >80% 红灯告警永远消不掉 , 只能把
+  //  tubeLifeML 调大或设 0 禁用整个功能 。这里给它一个正式的清零入口 。
+  //  刻意不校验状态 : 运行中清零也安全 , 本次分液结束时照常 += targetVolume 。
+  //  markDirty() 只是置标志 , 真正落盘由 loop() 在 IDLE / DONE 时统一做 。
+  if ( strcmp( cmd, "reset_tube_life" ) == 0 ) {
+    pump.totalDispensed = 0;
+    markDirty();
+    beepConfirm();
+    return okResponse( cmd );
+  }
+
   // ===================================================================
   //  预灌 / 快排
   // ===================================================================

@@ -1,6 +1,6 @@
 # 蠕动泵控制器 — YZ1515 精密点液 / 喷射工作站（DM542 版）
 
-> `master` = **DM542 驱动版本，v2.4.0**，本仓库唯一的分支。
+> `master` = **DM542 驱动版本，v2.4.1**，本仓库唯一的分支。
 >
 > 2026-09-26 起对本分支做了一轮维护：**维护性审查**（修构建阻塞 + 删死代码 + 修 16 处缺陷）
 > 和 **校准向导重构 + 定时模式倒计时**（= v2.4.0），详见
@@ -155,11 +155,17 @@ ESP32 GND ──────────── DIR-
   `buzzer_tick()` 每帧推进，绝不 `delay()`
 - **WS2812 状态灯** — 待机暗绿呼吸 / 运行蓝（TIME 深蓝、JET 品红）/ 暂停琥珀脉动 /
   完成亮绿在 `DONE_HOLD_MS` 内渐暗 / 回吸青色脉动；管路寿命 > 80% 时叠加红色闪烁
-- **实时遥测** — `/api/status` 返回完整 JSON，前端 1 s 轮询（`index.html:273`）
+- **实时遥测** — `/api/status` 返回完整 JSON，前端 1 s 轮询
+  （`index.html` 的 `connectHTTP()` 里 `setInterval(poll, 1000)`）
 
 ### 智能保护
 
-- **管路寿命追踪** — 累计流量统计，达到设定值时 LED 红灯告警（`tubeLifeML = 0` 表示禁用）
+- **管路寿命追踪** — 累计流量统计（`totalDispensed`），超过阈值的 80% 时 LED 叠加红色闪烁
+  （`tubeLifeML = 0` 表示禁用）。计数器**只增不减**：4 处写入全是 `+=`（JET / VOLUME /
+  TIME / 回吸的完成分支），`stop` / `reset` 走的 `resetPump()` 也不碰它，且落盘在
+  EEPROM offset 23 —— 所以**换完管子必须用 `reset_tube_life` 清零**（Web UI 高级设置
+  面板的「累计清零」按钮），否则 `tubePct` 和红灯告警永远消不掉。清零只动计数器，
+  不改 `tubeLifeML` 阈值，运行中也接受（本次分液结束时照常累加）
 
 > 本分支**没有**堵转检测、没有自动关使能（ENA 未接线，`stepperEnabled` 恒为 true）、
 > 没有 BLE。三者都曾在文档里出现过，实际要么从未实现、要么已删除，详见 §5。
@@ -240,6 +246,7 @@ header 显示当前可访问地址 · STA 连接成功自动弹提示
 | `jet_start` / `jet_stop` | — | 喷射启停（JET 模式下与 `start` / `stop` 等效） |
 | `set_anti_drip` | `value`: 0–5 | 回吸量 mL |
 | `set_tube_life` | `value`: 0–200000 | 管路寿命 mL（0 = 禁用） |
+| `reset_tube_life` | — | 累计流量 `totalDispensed` 清零（换管后用）。不改 `tubeLifeML` 阈值，不校验状态 |
 | `calib_enter` → `calib_select_liquid` → `calib_set_vol` → `calib_start_run` → `calib_stop_run` → `calib_measure` → `calib_save` → `calib_settings_done` | `calib_select_liquid`: `index` 0–3（写 `calibLiquid`，保存后才成为日常液体）；`calib_set_vol`: `value` 0.1–99999（校准体积 mL）+ 可选 `flow` 0.1–1600（本次校准流量 mL/min，缺省沿用当前 `flowRate`）；`calib_measure`: `value`（量筒实测 mL） | 校准向导；`calib_abort` 可在任意步退出。向导只写 `calibLiquid` / `calibTargetVol` / `calibFlowRate`，**不改任何日常设定**，唯一提交点是 `calib_save`。**向导期间主面板锁定**：`set_mode` / `set_flow` / `set_volume` / `set_time` / `set_liquid` / `start` / `prime_start` 返回错误，`stop` / `reset` 转成 `calibStopRun()`（会清 `calibRunning`），退出统一走 `calibLeave()` |
 | `prime_start` / `prime_stop` | — | 预灌快排 |
 | `get_state` | — | 获取完整遥测 |
@@ -364,10 +371,10 @@ ESP32 Arduino core **3.3.10**。其余 `WiFi.h` / `ESPmDNS.h` / `EEPROM.h` / `es
 
 ### 资源占用（实测）
 
-v2.4.0，`esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=huge_app`：
+v2.4.1，`esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=huge_app`：
 
 ```
-Sketch uses 1051604 bytes (33%) of program storage space. Maximum is 3145728 bytes.
+Sketch uses 1051716 bytes (33%) of program storage space. Maximum is 3145728 bytes.
 Global variables use 52848 bytes (16%) of dynamic memory, leaving 274832 bytes for local variables.
 ```
 
@@ -606,6 +613,30 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 > 2026-09-26 之前的条目记录的是**当时**的代码状态。其中若干机制此后已被移除或改正
 > （FreeRTOS 命令队列、`/api/info`、STA 30 s 超时、3 秒堵转检测、"RMT 迁移"），
 > 阅读时请以 §2–§4 的当前描述为准。
+
+### v2.4.1 (2026-09-27) — 管路寿命累计可清零
+
+- 新增命令 **`reset_tube_life`**：把 `totalDispensed` 归零 + `markDirty()`。此前这个计数器
+  **只增不减** —— 4 处写入全是 `+=`（`pump_machine.cpp` 的 JET / VOLUME / TIME / 回吸完成
+  分支），`resetPump()` 不碰它，又落盘在 EEPROM offset 23，于是换完管子 `tubePct` 与
+  LED 的 >80% 红灯告警永远消不掉，唯一的绕法是把 `tubeLifeML` 调大或设 0 关掉整个功能
+- 刻意**不校验状态**：运行中清零也安全，本次分液结束时照常 `+= targetVolume`。
+  `markDirty()` 只置标志，落盘仍由 `loop()` 在 `IDLE` / `DONE` 时统一做，不会在运行中写 flash
+- `loadParams()` 补上 `totalDispensed` 的 `clampF()`（0–1e9，默认 0）。它是唯一漏网的落盘
+  浮点，§2「加载时每个浮点都过 `clampF()`」在 v2.4.0 并不成立；半写产生的 NaN 会让
+  `tubePct` 变成 `(int)NaN`（UB）、遥测打印 `nan`，且寿命告警永远判不出来
+- Web UI 高级设置面板加「累计清零」按钮（`btn-sm` + 专属 toast「✓ 累计已清零」）；
+  `pump_cli.py` 两份副本各加同名子命令，走已有的无参 `else` 分支
+- 模拟后端与断言同步：`node tools/test_ui_preview_sim.js` 80 → **92** 条。新增 H 组覆盖
+  「完成后累加 / 清零 / 阈值不动 / 日常设定不动 / 运行中清零本次仍计数」
+- 版本号 `2.4.0` → `2.4.1`（不用 `v2.5.0`：那个号曾属于已删除的 tmc2226 线，避免混淆）
+
+**未上板验证**（本版只做了编译 + 模拟后端断言）：高级设置面板点「累计清零」后，
+「已用」应变 0 mL、「寿命」变 0%、LED 红色闪烁停止；断电重启后仍应是 0
+（`markDirty()` 要等 `IDLE` / `DONE` 才落盘，正常点按后必然经过 `IDLE`）。
+
+编译验证：固件 1051716 bytes (33%)、静态内存 52848 bytes (16%)、本项目代码零警告
+（比 v2.4.0 多 112 bytes）。
 
 ### v2.4.0 (2026-09-27) — 校准向导独立参数 + 定时模式倒计时
 

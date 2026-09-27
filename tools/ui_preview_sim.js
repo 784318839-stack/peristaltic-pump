@@ -217,6 +217,8 @@
       case 'set_jet_pressure': e = rng(cmd, p.v, 1, 10, '1 - 10');         if (e) return e; D.jetPressure = p.v; return ok(cmd);
       case 'set_anti_drip':  e = rng(cmd, p.v, 0, 5.0, '0 - 5.0');        if (e) return e; D.antiDripVol = p.v; return ok(cmd);
       case 'set_tube_life':  e = rng(cmd, p.v, 0, 200000, '0 - 200000');  if (e) return e; D.tubeLifeML = p.v; return ok(cmd);
+      /* 换管后清零累计; 不动 tubeLifeML 阈值, 也不校验状态 (固件同样不校验) */
+      case 'reset_tube_life': D.totalDispensed = 0; return ok(cmd);
       case 'jet_start':
         if (D.mode !== 'JET') return err(cmd, 'Not in jet mode');
         if (D.state !== 'IDLE') return err(cmd, 'Pump not idle');

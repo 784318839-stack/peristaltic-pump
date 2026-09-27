@@ -222,6 +222,9 @@ button:active{transform:scale(.95);opacity:.8}
       已用: <span id="advTotalDispensed" style="color:var(--accent)">--</span> mL |
       寿命: <span id="advTubePct" style="color:var(--accent)">--</span>%
     </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn-sm" onclick="sendCmd('reset_tube_life')" title="把「已用」累计清零，换完管子用这个；寿命阈值本身不变">累计清零</button>
+    </div>
   </div>
 
   <!-- 设备信息 -->
@@ -336,6 +339,7 @@ function sendCmd(cmd, params = {}) {
       if (d.id === 'start') toast('▶ 已启动');
       else if (d.id === 'pause') toast('⏸ 已暂停');
       else if (d.id === 'stop') toast('■ 已停止');
+      else if (d.id === 'reset_tube_life') toast('✓ 累计已清零');
       else if (d.id === 'calib_measure' && d.data) {
         /* Update calibration result display */
         var el = $('#calibResult');

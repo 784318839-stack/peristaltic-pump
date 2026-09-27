@@ -67,6 +67,11 @@ bool loadParams() {
   pump.targetVolume  = clampF(pump.targetVolume,  0.1, 99999,  10.0);
   pump.targetTime    = clampF(pump.targetTime,    1, 86400,    30.0);
   pump.antiDripVol   = clampF(pump.antiDripVol,   0, 5.0,       0.05);
+  // totalDispensed 原先是唯一没过 clampF 的落盘浮点 ( README §2 的「每个浮点都过
+  // clampF」因此并不成立 )。它在 EEPROM offset 23, 半写产生的 NaN 会让 tubePct
+  // 变成 (int)NaN ( UB ) 、遥测打印 nan, 且 LED 的寿命告警永远判不出来。
+  // 上限取 1e9: float32 在这个量级已分辨不出单次分液, 再大的累计值没有意义。
+  pump.totalDispensed = clampF(pump.totalDispensed, 0, 1e9, 0);
   pump.tubeLifeML    = clampF(pump.tubeLifeML,    0, 200000,  50000);
   pump.jetVolume     = clampF(pump.jetVolume,     0.1, 10.0,    1.0);
   pump.jetInterval   = clampF(pump.jetInterval,   1, 60,        3.0);

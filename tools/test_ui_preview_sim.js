@@ -208,6 +208,38 @@ ck('menu_main stops the calib run', cmd('menu_main').ok && S.D.calibRunning === 
 ck('menu_main clears the wizard', S.D.menu === 'MAIN' && S.D.calibStep === 0, { menu: S.D.menu, step: S.D.calibStep });
 ck('menu_main leaves daily settings untouched', JSON.stringify(snap()) === JSON.stringify(preAbort), snap());
 
+/* ---------- H. reset_tube_life — 换管后累计流量必须能清零 ---------- */
+cmd('set_mode', { m: 'VOLUME' });
+cmd('set_volume', { v: 10 });
+cmd('set_tube_life', { v: 100 });
+const preTube = snap();
+const baseTotal = S.D.totalDispensed;
+cmd('start');
+advance(20000);            /* 10 mL @ 123 mL/min ≈ 4.9 s + 回吸 0.08 s + DONE 2 s */
+ck('a completed run adds targetVolume to totalDispensed',
+   Math.abs(S.D.totalDispensed - (baseTotal + 10)) < 0.001, { now: S.D.totalDispensed, baseTotal });
+ck('tubePct > 0 before the reset', S.telemetry().tubePct > 0, S.telemetry().tubePct);
+const rt = cmd('reset_tube_life');
+ck('reset_tube_life ok', rt.ok, rt);
+ck('totalDispensed zeroed', S.D.totalDispensed === 0, S.D.totalDispensed);
+ck('tubePct back to 0 (LED 的 >80% 红灯告警随之消失)', S.telemetry().tubePct === 0, S.telemetry().tubePct);
+ck('reset_tube_life does NOT touch the tubeLifeML threshold', S.D.tubeLifeML === 100, S.D.tubeLifeML);
+ck('reset_tube_life does NOT touch daily settings',
+   JSON.stringify(snap()) === JSON.stringify(preTube), { now: snap(), preTube });
+ck('state still IDLE after the reset', S.D.state === 'IDLE', S.D.state);
+
+/* 固件刻意不校验状态: 运行中也接受清零, 本次分液结束时照常累加 */
+cmd('start');
+advance(2000);
+ck('reset accepted while RUNNING', S.D.state === 'RUNNING' && cmd('reset_tube_life').ok, S.D.state);
+ck('totalDispensed is 0 right after the mid-run reset', S.D.totalDispensed === 0, S.D.totalDispensed);
+advance(20000);
+ck('the in-flight dispense still counts after the reset',
+   Math.abs(S.D.totalDispensed - 10) < 0.001, S.D.totalDispensed);
+cmd('set_tube_life', { v: 50000 });
+cmd('reset_tube_life');
+ck('tubeLifeML restored for the following sections', S.D.tubeLifeML === 50000, S.D.tubeLifeML);
+
 /* ---------- G. HTTP query parsing of &f= ---------- */
 cmd('calib_enter');
 cmd('calib_select_liquid', { i: 0 });

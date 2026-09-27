@@ -13,6 +13,6 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define FW_VERSION "2.4.0"
+#define FW_VERSION "2.4.1"
 
 #endif  // VERSION_H
