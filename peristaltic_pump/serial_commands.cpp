@@ -9,6 +9,7 @@
 #include "serial_commands.h"
 #include "command_protocol.h"
 #include "pump_shared.h"
+#include "version.h"
 #include <esp_heap_caps.h>
 
 #define SERIAL_BAUD 115200
@@ -36,7 +37,7 @@ void initSerialBuffers() {
 void initSerialCommands() {
   unsigned long start = millis();
   while ( !Serial && millis() - start < 2000 ) { delay( 10 ); }
-  Serial.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.3.2\"}" );
+  Serial.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"" FW_VERSION "\"}" );
 }
 
 void processSerialCommands() {
@@ -70,7 +71,7 @@ void initHardwareUart() {
   hwUart.begin( 115200, SERIAL_8N1, HW_UART_RX, HW_UART_TX );
   unsigned long start = millis();
   while ( !hwUart && millis() - start < 1000 ) { delay( 5 ); }
-  hwUart.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"2.3.2\",\"port\":\"UART1\"}" );
+  hwUart.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"" FW_VERSION "\",\"port\":\"UART1\"}" );
 }
 
 void processHardwareUart() {

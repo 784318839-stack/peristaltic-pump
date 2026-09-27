@@ -2,6 +2,7 @@
  * Peristaltic Pump Controller v3 — YZ1515 precision dispensing / jet workstation
  * Hardware: ESP32-S3-WROOM-1-N16 (16 MB Flash)
  * v2.3.2: PumpState struct extracted, pump_machine state machine module, cleaner architecture
+ * 当前版本号以 version.h 的 FW_VERSION 为准，变更历史见 README §6 更新日志
  ******************************************************************************/
 
 #include <Arduino.h>

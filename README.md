@@ -1,9 +1,13 @@
 # 蠕动泵控制器 — YZ1515 精密点液 / 喷射工作站（DM542 版）
 
-> `master` = **DM542 驱动版本，v2.3.8**，本仓库唯一的分支。
+> `master` = **DM542 驱动版本，v2.4.0**，本仓库唯一的分支。
 >
-> 2026-09-26 对本分支做过一次**维护性审查**（修构建阻塞 + 删死代码 + 修 16 处缺陷），
-> 详见 [§5 代码审查记录](#5-代码审查记录-2026-09-26) 与 [§6 更新日志](#6-更新日志)。
+> 2026-09-26 起对本分支做了一轮维护：**维护性审查**（修构建阻塞 + 删死代码 + 修 16 处缺陷）
+> 和 **校准向导重构 + 定时模式倒计时**（= v2.4.0），详见
+> [§5 代码审查记录](#5-代码审查记录-2026-09-26) 与 [§6 更新日志](#6-更新日志)。
+>
+> 固件自报的版本号（串口 hello 里的 `version` 字段）以 `peristaltic_pump/version.h`
+> 的 `FW_VERSION` 为**唯一来源**；发版时要同步本行、§6 新条目和 `git tag`。
 
 基于 ESP32-S3 的蠕动泵控制器，驱动 YZ1515 工业泵头，实现**体积 / 时间 / 喷射**三种模式的
 精密流体控制。步进驱动为 **DM542 数字驱动器 + 6N137 光耦隔离**，控制端为内嵌 Web UI
@@ -360,9 +364,11 @@ ESP32 Arduino core **3.3.10**。其余 `WiFi.h` / `ESPmDNS.h` / `EEPROM.h` / `es
 
 ### 资源占用（实测）
 
+v2.4.0，`esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=huge_app`：
+
 ```
-Sketch uses 1046196 bytes (33%) of program storage space. Maximum is 3145728 bytes.
-Global variables use 52840 bytes (16%) of dynamic memory, leaving 274840 bytes for local variables.
+Sketch uses 1051604 bytes (33%) of program storage space. Maximum is 3145728 bytes.
+Global variables use 52848 bytes (16%) of dynamic memory, leaving 274832 bytes for local variables.
 ```
 
 本项目代码在 `--warnings all` 下**零警告**（剩余警告全部来自 FastAccelStepper /
@@ -388,6 +394,7 @@ esp32 core / tinyusb）。
 peristaltic-pump/                 # 仓库根 (master 分支)
 ├── peristaltic_pump/             # ← Arduino sketch 目录，用 IDE 打开这个
 │   ├── peristaltic_pump.ino      # setup / loop 组装
+│   ├── version.h                 # FW_VERSION —— 版本号唯一来源（两处 hello 引用）
 │   ├── pump_shared.h             # 枚举 / 常量 / 引脚 / extern 声明
 │   ├── pump_state.h/.cpp         # PumpState 结构体，所有运行状态集中管理
 │   ├── pump_machine.h/.cpp       # 状态机：transition() + on_entry() + per-state tick
@@ -600,7 +607,10 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 > （FreeRTOS 命令队列、`/api/info`、STA 30 s 超时、3 秒堵转检测、"RMT 迁移"），
 > 阅读时请以 §2–§4 的当前描述为准。
 
-### 2026-09-26 — 校准向导独立参数 + 定时模式倒计时
+### v2.4.0 (2026-09-27) — 校准向导独立参数 + 定时模式倒计时
+
+> 本版本涵盖自 v2.3.8 (2026-07-30) 以来的全部改动，包括下面那条
+> `2026-09-26 — 维护性审查`（当时没有单独打版本号）。
 
 **校准不再碰日常设定：**
 
@@ -650,6 +660,14 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 `ui_preview_template.html` + `ui_preview_sim.js` + `test_ui_preview_sim.js`）。
 `--check` 判断桌面预览是否落后于 `index.html`，`node tools/test_ui_preview_sim.js`
 用 80 条断言盯着模拟后端与固件语义的一致性（详见 §4）
+
+**版本号：**
+
+- 新增 `peristaltic_pump/version.h`（`FW_VERSION "2.4.0"`）作为**唯一来源**，两处 hello
+  应答改成字符串拼接引用它。此前 hello 里的 `2.3.2` 自 v2.3.2 起就没跟着 README 声明的
+  v2.3.8 走过，`pump_cli.py` 连上去会打印「设备: PeristalticPump v2.3.2」
+- 发版流程写在 `version.h` 的注释里：改 `FW_VERSION` → 改 README 第 3 行 → 加 §6 条目
+  → `git tag v<版本号>`
 
 编译验证：固件 1051604 bytes (33%)、静态内存 52848 bytes (16%)、本项目代码零警告。
 
