@@ -1,10 +1,10 @@
 # 蠕动泵控制器 — YZ1515 精密点液 / 喷射工作站（DM542 版）
 
-> `master` = **DM542 驱动版本，v2.4.1**，本仓库唯一的分支。
+> `master` = **DM542 驱动版本，v2.4.2**，本仓库唯一的分支。
 >
 > 2026-09-26 起对本分支做了一轮维护：**维护性审查**（修构建阻塞 + 删死代码 + 修 16 处缺陷）
 > 和 **校准向导重构 + 定时模式倒计时**（= v2.4.0），详见
-> [§5 代码审查记录](#5-代码审查记录-2026-09-26) 与 [§6 更新日志](#6-更新日志)。
+> [§5 代码审查记录](#5-代码审查记录) 与 [§6 更新日志](#6-更新日志)。
 >
 > 固件自报的版本号（串口 hello 里的 `version` 字段）以 `peristaltic_pump/version.h`
 > 的 `FW_VERSION` 为**唯一来源**；发版时要同步本行、§6 新条目和 `git tag`。
@@ -25,7 +25,7 @@
 2. [功能](#2-功能)
 3. [控制接口](#3-控制接口)
 4. [构建与烧录](#4-构建与烧录)
-5. [代码审查记录 (2026-09-26)](#5-代码审查记录-2026-09-26)
+5. [代码审查记录](#5-代码审查记录)
 6. [更新日志](#6-更新日志)
 
 ---
@@ -97,7 +97,7 @@ ESP32 GND ──────────── DIR-
 | 模式 | 参数 | 行为 |
 |---|---|---|
 | **体积** `MODE_VOLUME` | 流量 0.1–1600 mL/min，目标体积 0.1–99999 mL | 恒速运行到目标步数自动停止 |
-| **时间** `MODE_TIME` | 体积 + 时间 1–86400 s | 运行时按 体积/时间 反算实际流量，写入 `activeFlowRate`（**不覆盖**用户设定的 `flowRate`）；到时间或到步数任一先到即停（时间判定有 +1 s 容差） |
+| **时间** `MODE_TIME` | 体积 + 时间 1–86400 s | 运行时反算实际流量写入 `activeFlowRate`（**不覆盖**用户设定的 `flowRate`）。反算要扣掉升速/减速段：加速度是 `ACCEL_FACTOR×pps`，所以升到全速恒需 `1/ACCEL_FACTOR ≈ 3.33 s`，减速段等长。梯形支（`T ≥ 6.67 s`）取 `v = V/(T−3.33)`，三角形支取 `v = 4·V·3.33/T²`，两支都让总耗时正好落在 `T`；被 1600 mL/min 钳住时才由时间截断兜底（+1 s 容差），**此时按实际出液量记管路寿命，不是按目标体积** |
 | **喷射** `MODE_JET` | 单次量 0.1–10 mL，间隔 1–60 s，流量 10–1600 mL/min，压力 1–10 级 | 循环喷射，无回吸。`RUNNING` 会一直循环，必须显式 `stop` / `jet_stop` 才退出 |
 
 喷射模式的双参数语义：**流量**管远近，**压力**（映射为加速度倍率）管爆发力。
@@ -356,6 +356,45 @@ Mode: MODE_VOLUME ⇄ MODE_TIME ⇄ MODE_JET
 arduino-cli compile --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=huge_app" peristaltic_pump
 ```
 
+### PlatformIO（与上面共用同一批源文件）
+
+`platformio.ini` 放在仓库根，`src_dir` 直接指向 `peristaltic_pump/`。PlatformIO 会把
+`.ino` 当 `.cpp` 编译并自动补函数原型，所以 sketch 目录不用改名、拆分或复制 ——
+两条构建路径吃的是同一份代码，改哪边都生效。
+
+```
+pio run                # 编译
+pio run -t upload      # 烧录
+pio run -t size        # flash / RAM 占用
+pio device monitor     # 115200
+```
+
+| 项 | 值 | 等价的 IDE 设置 |
+|---|---|---|
+| platform | pioarduino `55.03.311`（GitHub release zip，官方 registry 没有这个包） | Arduino core **3.3.11** + ESP-IDF 5.5.5 |
+| board | `esp32-s3-devkitc1-n16r8` | ESP32S3 Dev Module + 16MB Flash + OPI PSRAM |
+| 分区 | `board_build.partitions = huge_app.csv` | Huge APP (3MB No OTA) |
+| USB CDC | `build_flags = -DARDUINO_USB_CDC_ON_BOOT=0` | USB CDC On Boot: Disabled |
+| 依赖 | `lib_deps` 钉死 1.2.7 / 7.4.3 / 1.15.5 | 见下表 |
+
+> ⚠️ **platform 只能走 pioarduino。** 官方 `platformio/espressif32`（本机 7.0.1）只带
+> core 2.0.17 / IDF 4.4，这份 3.x 代码编不过。
+
+> ⚠️ **board 别退回 `esp32-s3-devkitc-1`** —— 那颗是 **N8，无 PSRAM**。pioarduino 判断
+> PSRAM 只看 board 的 `extra_flags` / sdkconfig，`board_build.arduino.memory_type` 配了
+> 也不生效，结果是编译照样通过、缓冲区全部退回内部 SRAM。`…-n16r8` 自带
+> `-DBOARD_HAS_PSRAM` + `psram_type: opi` + 16MB。
+
+> ⚠️ **`peristaltic_pump.ino` 不能带 UTF-8 BOM。** Arduino IDE 有无 BOM 都无所谓，但
+> PlatformIO 的 `.ino → .cpp` 转换器会把 BOM 留在生成文件的首行，使 `#include <Arduino.h>`
+> 整行失效：先报 `'\ufeff' does not name a type`，再跟一串 FastAccelStepper 的莫名级联错误。
+> 约束只在 `.ino` 上 —— `.cpp/.h` 带不带 BOM 两边都能编（仓库里本来就混着用：11 个带、15 个不带）。
+
+> ⚠️ **Windows 要开长路径支持**，否则 `esp32-core-*-libs` 解包失败：包内最深的头文件
+> （`…/connectedhomeip/…/camera-av-settings-user-level-management-server.h`）超过 260 字符。
+> 管理员 PowerShell 执行后重启：
+> `New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -Type DWord -Force`
+
 ### 依赖库
 
 | 库 | 版本（本机实测） | 用途 |
@@ -364,6 +403,14 @@ arduino-cli compile --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,Partitio
 | [ArduinoJson](https://arduinojson.org/) | 7.4.3 | JSON 解析 / 序列化 |
 | [Adafruit_NeoPixel](https://github.com/adafruit/Adafruit_NeoPixel) | 1.15.5 | WS2812 状态灯（RMT） |
 
+> ❌ **PlatformIO 这条路必须停在 FastAccelStepper 1.2.7，别升 1.4.0。** 1.4.0 的 RMT 组触发
+> 代码（`SUPPORT_ESP32_RMT_SYNC` 分支）在 pioarduino 55.03.311 / core 3.3.11 / IDF 5.5.5 /
+> GCC 14.2 下编不过：`esp32_queue.cpp:647` 用 `rmt_new_sync_manager(&chan, n, &mgr)` 调用
+> 签名是 `rmt_new_sync_manager(const rmt_sync_manager_config_t*, rmt_sync_manager_handle_t*)`
+> 的接口，另外还引用了未声明的 `rmt_sync_manager_add_channel()` / `rmt_sync_manager_del_channel()`。
+> 同一天用 arduino-cli + 本机 core 3.3.11 编 1.4.0 **是通过的**，所以这是 PlatformIO 这条
+> 路径上才出现的差异，具体成因未查 —— 不要把「1.4.0 坏了」推广到 IDE 那边。
+
 ESP32 Arduino core **3.3.10**。其余 `WiFi.h` / `ESPmDNS.h` / `EEPROM.h` / `esp_wifi.h` /
 `esp_mac.h` / `esp_heap_caps.h` 均为 core 自带。
 
@@ -371,24 +418,42 @@ ESP32 Arduino core **3.3.10**。其余 `WiFi.h` / `ESPmDNS.h` / `EEPROM.h` / `es
 
 ### 资源占用（实测）
 
-v2.4.1，`esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=huge_app`：
+v2.4.2，走 Arduino IDE / arduino-cli 路径
+（`esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=huge_app`，core 3.3.11 +
+本机 Arduino 库目录里的 FastAccelStepper **1.4.0**，`--warnings all`）：
 
 ```
-Sketch uses 1051716 bytes (33%) of program storage space. Maximum is 3145728 bytes.
-Global variables use 52848 bytes (16%) of dynamic memory, leaving 274832 bytes for local variables.
+Sketch uses 1043416 bytes (33%) of program storage space. Maximum is 3145728 bytes.
+Global variables use 53076 bytes (16%) of dynamic memory, leaving 274604 bytes for local variables.
 ```
 
-本项目代码在 `--warnings all` 下**零警告**（剩余警告全部来自 FastAccelStepper /
-esp32 core / tinyusb）。
+同一份源码走 PlatformIO（pioarduino 55.03.311 / core 3.3.11 / IDF 5.5.5 / GCC 14.2，
+`lib_deps` 钉 FastAccelStepper **1.2.7**，`pio run -t clean` 后重编复现）：
+
+```
+RAM:   16.2% (used 53076 bytes from 327680 bytes)
+Flash: 33.8% (used 1064080 bytes from 3145728 bytes)
+```
+
+两条路径的 **RAM 完全一致（53076 B）**，flash 差 20664 B，主要来自 FastAccelStepper 的
+库版本（1.4.0 vs 1.2.7）；两边工具链细节未逐项归因。历史对照可佐证「差在库不在构建系统」：
+v2.4.1 时 IDE 路径（core 3.3.10 + FAS 1.2.7）是 1051716 B / 52848 B，2026-10-05 用
+core 3.3.11 + FAS 1.4.0 复测**同一条 IDE 路径**降到 1042168 B / 53068 B —— 光换库版本
+就少约 9.5 KB flash。
+
+两条路径下本项目代码在 `--warnings all` 下都是**零警告**，唯一一条来自 FastAccelStepper 的
+`pd_esp32/StepperISR_idf5_esp32_mcpwm_pcnt.cpp:354` `gpio_iomux_in` 弃用提示
+（其余噪声全部来自 FastAccelStepper / esp32 core / tinyusb）。
 
 | 存储器 | 容量 | 占用 |
 |--------|------|------|
 | Flash | 16 MB（Huge APP 分区 3 MB） | 固件 1.00 MB / **33%** |
-| 内部 SRAM | ~320 KB | 静态 51.6 KB / **16%**，其余给 WiFi 协议栈与 FreeRTOS 任务栈 |
+| 内部 SRAM | ~320 KB | 静态 51.8 KB / **16%**，其余给 WiFi 协议栈与 FreeRTOS 任务栈 |
 | PSRAM | 8 MB Octal | 遥测 / 响应 / 串口缓冲区优先分配在此，失败回退内部 RAM |
 
 删除 BLE（NimBLE）带来 1.20 MB → 1.00 MB（省 202 KB）、内部 SRAM 静态占用
-56.3 KB → 49.7 KB（省 6.7 KB）；之后 HTTP 请求缓冲又占回 2 KB，即上表的 51.6 KB。
+56.3 KB → 49.7 KB（省 6.7 KB）；之后 HTTP 请求缓冲又占回 2 KB，v2.4.2 的斜坡补偿与
+返回值收口再加约 0.1 KB，即上表的 51.8 KB。
 
 ### 项目结构
 
@@ -425,6 +490,7 @@ peristaltic-pump/                 # 仓库根 (master 分支)
 ├── xtoys_script.js               # XToys 集成脚本（已放弃，仅供参考）
 ├── xtoys_js_only.js
 ├── minimal_test/                 # 硬件最小验证 sketch
+├── platformio.ini                # PlatformIO 构建入口（src_dir 指向上面的 sketch 目录）
 ├── hardware/                     # PCB / 结构件
 ├── LICENSE
 └── README.md
@@ -457,7 +523,7 @@ python peristaltic_pump/generate_web_ui.py
 python tools/make_ui_preview.py             # 默认写到 ~/Desktop/蠕动泵UI预览-DM542.html
 python tools/make_ui_preview.py --out x.html
 python tools/make_ui_preview.py --check     # 只检查预览是否落后于 index.html（过期退出码 1）
-node   tools/test_ui_preview_sim.js         # 80 条断言：模拟后端与固件语义是否一致
+node   tools/test_ui_preview_sim.js         # 111 条断言：模拟后端与固件语义是否一致
 ```
 
 预览顶部的倍速（1× / 5× / 20×）和命令日志面板是预览专用，固件 UI 里没有；命令日志会把
@@ -476,9 +542,9 @@ node   tools/test_ui_preview_sim.js         # 80 条断言：模拟后端与固�
 
 ---
 
-## 5. 代码审查记录 (2026-09-26)
+## 5. 代码审查记录
 
-对本分支做的一次完整审查。三个 commit：
+两轮独立审查。**第一轮（2026-09-26，A / B / C / D 组）** 是对本分支的一次完整审查，三个 commit：
 
 | commit | 内容 | 规模 |
 |---|---|---|
@@ -487,6 +553,10 @@ node   tools/test_ui_preview_sim.js         # 80 条断言：模拟后端与固�
 | `b024a6e` | 修复 16 处缺陷 + STA/AP 两处 + 清理乱码 + 本 README | 17 files，+673 / −312 |
 
 每个 commit 都单独编译验证过。完整的根因分析写在 `b024a6e` 的 commit message 里。
+
+**第二轮（2026-11-04，N 组）** 是在 v2.4.1 基线（`.ino` 与 tag 逐字节相同，仅去 BOM）上的
+复审：A1–A23 全部核对过、均已落地且描述准确，另发现 9 条档案之外的新问题，见本节末的
+「N 组」表格，修复落在 v2.4.2。
 
 ### A 组：已修复的缺陷
 
@@ -608,11 +678,180 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 
 ---
 
+### N 组：2026-11-04 复审新发现（v2.4.2）
+
+对全仓库做的一轮独立复审，编号与上面的 A/B/C/D 并列。基线是 v2.4.1（`.ino` 与 tag
+逐字节相同，仅去 BOM），A1–A23 全部核对过、**均已落地且描述准确**；下面是档案之外的新发现。
+详细机理与量化见 §6 的 v2.4.2 条目。
+
+| # | 问题 | 修法 / 现状 |
+|---|---|---|
+| **N1** | **定时模式系统性少出液，却按满额记管路寿命** —— 加速度是 `ACCEL_FACTOR × pps`（与速度成正比），升速段恒为 `1/ACCEL_FACTOR ≈ 3.33 s`，减速段等长；旧代码按匀速反算流量，电机要到 `targetTime+3.33 s` 才跑完，而截断在 `targetTime+1 s` 就触发，**永远抢在自然完成之前**。60 s 档 −1.36%、10 s 档 −8.17%、3 s 档 −27.0% | ✅ `startPump()` 改为反解总耗时正好等于 `targetTime` 的流量，梯形 / 三角形两支；截断路径改按实际出液量记账，读数前先等真停 |
+| **N2** | **A3 只修了一半** —— `applySpeed()` 内部确实检查了库的返回值，但它自己返回的 `bool` 被全部 6 个调用方丢弃，`moveTo()` 的 `MoveResultCode` 更是 6 处全丢 ⇒ A3 描述的「一个脉冲不发却上报分液完成」仍然可达，差别只是多一行日志 | ✅ 六个函数改 `bool`，新增 `moveOrLog()` 收口，五条命令翻译成 `ok:false`，失败时不进 RUNNING |
+| **N3** | `calibStopRun()` 在 `forceStop()` **之前**读 `getCurrentPosition()`，队列还会再走约 20 ms ⇒ `calibStepsRun` 偏小而量到的体积包含那段液量 ⇒ `spm` 系统性偏低、落盘后之后每次分液都少（校准流量 300/800/1600 mL/min 约 −1.0%/−2.7%/−5.3%）。A5 在 `pausePump()` 修过同一个坑，这里没修 | ✅ 改成 `forceStop()` → 轮询 `isRunning()` 到真停（上限 200 ms）→ 再读位置 |
+| **N4** | `handleWebClients()` 只有一个「每收到数据就续 200 ms」的静默超时 ⇒ 一个每 <200 ms 吐 1 字节的客户端能把 `loop()` 无限期占住。`delay(1)` 会喂狗所以不是 WDT 复位而是**活锁**：状态机 / 蜂鸣器 / LED / EEPROM 落盘全停摆，而电机靠 MCPWM+PCNT 硬件继续发脉冲 | ✅ 加 `REQ_HARD_TIMEOUT_MS = 2000` 绝对上限，用 `millis()-start` 的写法免回绕 |
+| **N5** | `(int32_t)(targetVolume × stepsPerMl)` 溢出：上界 `99999 × 50000 = 5e9 > INT32_MAX`，而超范围的 float→int32 是 **UB 不是回绕**。可达链条：`calib_measure` 只校验 `val > 0`，「0.1 mL / 3000 步」就能把 spm 标到 30000，再配 `targetVolume ≥ 71583` | ✅ `startPump()` / `calibStartRun()` 在动电机之前判界并拒绝。喷射与回吸经算不会越界，未加 |
+| **N6** | `stop` / `reset` 里 `!pump.calibRunning` 是**死守卫**：`calibStopRun()` 已经把它清成 false，守卫在其后才求值，从校准分支过来时恒为真，与它自己的注释相反。今天实际危害为零，但意图与行为不符 | ✅ 先把标志存进 `const bool wasCalib` |
+| **N7** | `prime_start` 不设 `pump.pumpStartMs`，而 `pause` 在 PRIME 期间是放行的（只校验 `state == RUNNING`）⇒ TIME 模式下 `pausePump()` 会用陈旧的 `pumpStartMs` 算 `pausedElapsedSec`，`resumePump()` 再据此回绕 `pumpStartMs`；`pausedRemainingSteps` 也会变成约 1e9（来自 `moveTo(999999999)`）。不影响出液量，但遥测 `elapsed`/`progress` 显示垃圾。另：排气速度写死 `flowRateToPPS(1500.0)`，忽略用户 `flowRate` | ⬜ **未修**（产品语义待定：排气期间到底该不该允许 pause） |
+| **N8** | 三处一致性：① `wifi_restart` 在 `parseAndExecute()` 里直接调 `restartWiFi()`，违反 `wifi_manager.h` 自己的契约，经 HTTP 下发时响应必丢（A10 只修了 `/api/wifi`）；② `okResponse`/`errResponse` 等 4 处 `snprintf(responseBuf,…)` 无 nullptr 保护，而 `buildTelemetryJson()` 有；③ `EEPROM_MAGIC`/`EEPROM_ADDR` 双份定义，`eeprom_store.h` 指向一个不存在的布局注释，offset 2 的 `stepsPerMl` 是永被覆盖的死字段 | ✅ ①改延迟执行（`requestWifiRestart()` + `loop()` 末尾 `serviceWifiRestart()`）②补 4 处保护 ③去重 + 补完整 0–282 偏移表 + 标注遗留字段 |
+| **N9** | 两个诊断遗留物：① `serial_commands.cpp` 里 `while(!Serial && …<2000)` 与 `while(!hwUart && …<1000)` 是**死等** —— `ARDUINO_USB_CDC_ON_BOOT=0` 时 `Serial` 就是 `Serial0`（`HardwareSerial.h:449-451`），而 `HardwareSerial::operator bool()` = `uartIsDriverInstalled()`（`HardwareSerial.cpp:594-596`），`begin()` 之后恒真，两个循环第一次判断就退出。注释里的「初始化 USB CDC 串口」也与本构建不符；② `minimal_test/minimal_test.ino` 的头注释说「Serial (USB CDC) 输出到串口监视器」，同样问题 —— 下次拿它做开机诊断前必须先改，否则会误判成「代码没跑」 | ⬜ **未修**（属注释订正与遗留文件去留，与 B5 一并待定） |
+
+**复审时撤回的一条疑虑**：按 DM542 的接口语义（ENA 光耦导通 = 脱机、悬空 = 默认使能），
+`peristaltic_pump.ino` 里 `digitalWrite(ENA_PIN, HIGH)` 配「ENA 始终使能」的注释在语义上可疑
+（HIGH 究竟是使能还是脱机，取决于共阳/推挽接法与放大器是否反相）。但 B3 已写明
+**ENA 未接（方案 D）**，GPIO18 的驱动对驱动器没有电气影响，故不作为缺陷。残留两点：
+`ensureStepperOn()` 只置一个 flag（B3 已记录），且源码里 3 处「ENA 始终使能 / 始终 HIGH」
+的注释在未接线下属误导 —— **若将来真的接线，必须先用万用表确认 MCU HIGH 时 DM542 侧光耦
+是否导通，不能沿用现在的注释。**
+
+---
+
 ## 6. 更新日志
 
 > 2026-09-26 之前的条目记录的是**当时**的代码状态。其中若干机制此后已被移除或改正
 > （FreeRTOS 命令队列、`/api/info`、STA 30 s 超时、3 秒堵转检测、"RMT 迁移"），
 > 阅读时请以 §2–§4 的当前描述为准。
+
+### v2.4.2 (2026-11-05) — 定时模式斜坡补偿 + 计量正确性 + 健壮性
+
+> 本版来自 2026-11-04 的一轮全仓库代码审查（新发现编号 N1–N9，与 §5 的 A/B/C/D 档案
+> 并列）。只做了「计量正确性」与「健壮性」两组，产品决策类的条目（B1 无鉴权、
+> B3 `stepperEnabled` 恒真、B5 重复的 `pump_cli.py`）仍未动。
+
+**N1 — 定时模式系统性少出液，却按满额记管路寿命（本版最主要的修复）**
+
+- 根因：`applyFlowSpeed()` 给的加速度是 `A = ACCEL_FACTOR × pps`，**与目标速度成正比**，
+  于是升到全速的时间 `v/A = 1/ACCEL_FACTOR ≈ 3.33 s` 是个与速度无关的常量，减速段等长。
+  而旧代码按 `activeFlowRate = targetVolume/(targetTime/60)` 反算流量，等于假设匀速跑满
+  全程，电机实际要到 `targetTime + 3.33 s` 才跑完 —— `tick_running()` 的时间截断在
+  `targetTime + 1 s` 就触发，**永远抢在自然完成之前**
+- 修复：`startPump()` 改为反解「总耗时正好等于 `targetTime`」需要的匀速段流量，分两支
+  - 梯形（到得了全速，`targetTime ≥ 2/ACCEL_FACTOR ≈ 6.67 s`）：`v = V/(T − 3.33)`
+  - 三角形（到不了全速）：峰值 `vp = √(V·A)`、`T = 2√(V·t_ramp/v)` ⇒ `v = 4·V·t_ramp/T²`
+  - 两支在 `T = 2·t_ramp` 处连续（都给 `v = V/t_ramp`）
+- 截断路径（`pump_machine.cpp`）改为 `totalDispensed += 实际出液量`，不再 `+= targetVolume`。
+  读数前先 `forceStop()` 再轮询 `isRunning()` 到真停，否则少算约 20 ms 行程
+- 少出液量（用同步后的模拟后端运动模型算出，不是手算）：
+
+  | targetTime | 修复前 | 修复后 |
+  |---|---|---|
+  | 60 s | −1.36% | 0% |
+  | 30 s | −2.72% | 0% |
+  | 10 s | −8.17% | 0% |
+  | 5 s | −16.33% | 0% |
+  | 3 s | −27.02% | 0% |
+  | 500 mL / 10 s（需 4500 mL/min，被 1600 钳住） | 记 500，实出 248.9 | 记 **248.9** |
+
+- **写错过一次，记在这里免得重犯**：第一版把 `2/ACCEL_FACTOR ≈ 6.67 s` 当成「三角形曲线的
+  物理下限」，不可达档位就顶到 `V×60×ACCEL_FACTOR`。这是错的 —— 因为 `A` 与 `v` 成正比，
+  提速的同时也提加速度，`T(v) = 2√(V·t_ramp/v)` 在三角形区**仍然单调递减，没有下限**。
+  那个偏慢的速度让 3 s 档从 −27% 恶化到 −32%。真正的限制只有 `constrain` 的 1600 mL/min
+- 同理，报告里最初给的少出液百分比（60 s 档 −2.8%）也**夸大了约 2 倍** —— 漏算了截断条件
+  `pumpElapsed ≥ pumpDuration + 1` 里那 1 秒宽限，它把大部分斜坡亏空还回来了。
+  正确系数是 `≈0.817/targetTime`，上表是修正后的值
+
+**N2 — A3 只修了一半：`applySpeed()` / `moveTo()` 的返回值被所有调用方丢弃**
+
+- §5 的 A3 说「两个调用的返回值都检查」，那指的是 `applySpeed()` **内部**对
+  `setSpeedInMilliHz` / `setAcceleration` 的检查。但它自己返回的 `bool` 当时无人使用，
+  `moveTo()` 的 `MoveResultCode` 更是 6 处全丢 ⇒ A3 描述的失效场景仍然可达：
+  速度设失败 → 只打一行日志 → 照样 `moveTo()` → 一个脉冲不发 → `tick_running()` 看到
+  `isRunning()==false` 判定跑完 → 上报「分液完成」并把 `targetVolume` 记进管路寿命
+- 修复：`applyFlowSpeed` / `startPump` / `resumePump` / `startJetSquirt` / `startJetCycle` /
+  `calibStartRun` 全部改 `bool`；新增 `moveOrLog()` 统一收口 6 处 `moveTo()`；
+  `start` / `resume` / `jet_start` / `calib_start_run` / `prime_start` 五条命令把失败翻译成
+  `ok:false`。失败时**不进 RUNNING**，`prime_start` 还会把 `currentMenu` 退回原值
+- `startJetSquirt()` 只在真的动起来之后才置 `jetSquirting`，于是 `tick_running()` 的等待
+  分支下一个 interval 会自动重试（喷射是周期动作，没有「命令发起方」可回报）
+- 回吸：设速失败就不再进 `ANTI_DRIP` —— 否则 `tick_anti_drip()` 一看 `isRunning()==false`
+  会立刻判定回吸完成，等于静默跳过这一步
+
+**N3 — `calibStopRun()` 在 `forceStop()` 之前读位置，A5 修好的坑这里没修**
+
+- 旧代码 `calibStepsRun = getCurrentPosition(); forceStop();` —— 队列里已规划的还会走约
+  20 ms，于是 `calibStepsRun` 偏小，而用户量到的实际体积**包含**那 20 ms 的液量
+  ⇒ `spm = 步数/体积` 系统性偏低，`calibSave()` 落盘后之后每次分液都少
+- 改成 `forceStop()` → 轮询 `isRunning()` 到真停（上限 200 ms）→ 再读位置，与
+  `pausePump()` 同一套。误差量级：校准流量 300/800/1600 mL/min 分别约 −1.0%/−2.7%/−5.3%
+- 正常跑完那条路径本来就没问题（`calibFinishRun()` 由 `tick_running()` 在 `!isRunning()`
+  时才调），**只有中途 `calib_stop_run` / `stop` / `menu_main` 会踩**
+
+**N4 — `handleWebClients()` 的超时会被无限续期（slowloris 活锁）**
+
+- 原来只有一个「每收到数据就续 200 ms」的静默超时。一个每 <200 ms 吐 1 字节的客户端可以把
+  `loop()` 无限期占住：循环里的 `delay(1)` 会喂狗所以**不会** WDT 复位，而是活锁 ——
+  `pump_machine_tick()` / `buzzer_tick()` / `led_tick()` / `saveParams()` 全部停摆，
+  而电机靠 MCPWM+PCNT 硬件继续发脉冲，变成「泵在跑但没人看着」
+- 加 `REQ_HARD_TIMEOUT_MS = 2000` 绝对上限（`REQ_IDLE_TIMEOUT_MS` 仍是 200）。
+  用 `millis() - start < HARD` 而不是 `millis() < hardDeadline`，对 49.7 天的回绕免疫
+- 合法请求 body 最大约 150 B，2 s 是十几个数量级的余量；`/api/scan` 那 8 s 阻塞发生在读完
+  之后的 `handleRequest()` 里，不受影响
+
+**N5 — `(int32_t)(float × float)` 溢出（UB，不是回绕）**
+
+- `targetVolume ≤ 99999` 且 `stepsPerMl ≤ 50000` ⇒ 乘积最大 5e9 > `INT32_MAX`。
+  够得着的路径：`calib_measure` 只校验 `val > 0`，所以「0.1 mL / 3000 步」就能把 spm 标到
+  30000（落在 `calibCalculate()` 的 `[10, 50000]` 内），再配 `targetVolume ≥ 71583` 就越界
+- `startPump()` 与 `calibStartRun()` 都在**动电机之前**判界并拒绝（`!(x <= INT32_MAX)` 的
+  写法同时挡住 NaN 与 inf）。喷射（`10 × 50000`）与回吸（`5 × 50000`）经算不会越界，未加
+
+**N6 — `stop` / `reset` 里 `!pump.calibRunning` 是死守卫，与它自己的注释相反**
+
+- `calibStopRun()` 内部会把 `calibRunning` 清成 `false`，而那句守卫在它**之后**才求值，
+  于是从校准分支走过来时恒为真，一次也拦不住。今天实际危害为零（`calibStopRun()` 已经
+  `forceStop()` + 转 IDLE，后面的 `stopJetCycle()` 只是重复动作），但注释描述的意图与行为
+  不符 ⇒ 先把标志存进 `const bool wasCalib`
+
+**N8 — 三处一致性**
+
+- `wifi_restart` 改为**延迟执行**：`requestWifiRestart()` 只置标志，`loop()` 末尾的
+  `serviceWifiRestart()` 才真正重启（排在 `handleWebClients()` 之后，那时响应已经
+  `flush()` + `stop()` 过）。原来在 `parseAndExecute()` 里直接调 `restartWiFi()`，
+  违反了 `wifi_manager.h` 自己写的契约 —— 经 HTTP 下发时响应必然丢失。A10 只修了
+  `/api/wifi` 那条路径。UI 不发这个命令（`index.html` 有注释说明），所以只影响手搓 URL / CLI
+- `okResponse` / `errResponse` / JSON 解析失败 / `get_state` 四个 `snprintf(responseBuf, …)`
+  站点补上 `nullptr` 保护。`buildTelemetryJson()` 早就有 `if (!telemetryBuf) return "{}"`，
+  两边标准现在一致。用字符串常量而不是静态兜底缓冲（后者要白占 1536 B BSS）
+- `EEPROM_MAGIC` / `EEPROM_ADDR` 在 `pump_shared.h` 与 `eeprom_store.cpp` 各定义一份
+  （值相同所以合法不报警，但双份维护）⇒ 删掉后者。`eeprom_store.h` 声称「布局见
+  `eeprom_store.cpp` 头部注释」而那里根本没有 ⇒ 补上完整的 0–282 偏移表，并写明
+  offset 2 的 `stepsPerMl` 是**遗留字段**（`loadParams()` 末尾必被 `liquidSPM[currentLiquid]`
+  覆盖，照写只是为了降级兼容）
+
+**模拟后端与断言同步**：`node tools/test_ui_preview_sim.js` 92 → **111** 条
+
+- `tools/ui_preview_sim.js` 原来是**理想积分器**（`dispensed += flow·dt`），根本没有斜坡，
+  所以复现不出 N1。改为梯形 / 三角形运动模型（`rampDispensed()` / `runDurationSec()`，
+  与固件公式同源），`finishRun(charged)` 现在区分「跑完全程记满额」与「被截断记实际量」
+- 新增 I 组断言：I-0 回归护栏（把补偿公式改回 `V×60/T` 就立刻红）、I-1 梯形支、
+  I-2 三角形支、I-3 钳位截断记账
+- 修正 2 条基于旧理想模型的时序断言（校准 3 s 的出液量 40 → 18 mL；跑完 100 mL @
+  800 mL/min 的等待 8 s → 11.5 s）
+
+**文档**：§3 模式表的 TIME 行重写（原文「按 体积/时间 反算实际流量」已过期）；
+§4 的断言数 80 → 111（那个 80 在 v2.4.1 时就已过期）。§5 的 A/B/C/D 档案与旧更新日志
+一律未改 —— 它们是历史记录。
+
+编译验证：`pio run`（FastAccelStepper 1.2.7）**SUCCESS** — Flash 1064080 B (33.8%)、
+RAM 53076 B (16.2%)；`arduino-cli --warnings all`（FastAccelStepper 1.4.0）exitCode 0 —
+Sketch 1043416 B (33%)、RAM 53076 B (16%)，**本项目代码零警告**（唯一一条来自
+`FastAccelStepper/src/pd_esp32/StepperISR_idf5_esp32_mcpwm_pcnt.cpp:354` 的
+`gpio_iomux_in` 弃用提示）。比 v2.4.1 的 1062908 B 多 1172 B。
+
+**未上板验证**（本版只做了编译 + 模拟后端断言）：
+
+- **N1 的核心前提**：FastAccelStepper 规划的减速段 = 加速段 = `ACCEL_FACTOR × pps`。
+  这是从 `applySpeed()` 的实参和库的 `RampCalculator` 读出来的，没有实测。
+  整套补偿公式都建立在这个对称性上；若实测不等，`startPump()` 两支公式的常数要重算，
+  其余改动不受影响
+- **N1 实出液量**：TIME 模式 60 s / 10 s / 3 s 各称重一次，期望偏差 <1%
+  （改前分别 −1.36% / −8.17% / −27.0%）。不上天平的替代验证：盯遥测 `progress` 在
+  `state` 转 `DONE` 那一刻的值，改前应恒 <100，改后应为 100
+- **N3**：校准中途 `calib_stop_run` 后量体积算 spm，期望与连续跑完的校准一致
+- **N4**：用 `nc` 每 150 ms 发 1 字节连到 `:80`，改后应在 2 s 内被断开、遥测继续刷新
+- **N2 / N5** 的失败路径需要人为构造非法速度或离谱标定才能触发，正常档位走不到，
+  只能确认日志文本
+- `forceStop()` 后 20 ms 排空、200 ms 轮询上限是否够 —— 库文档值，未在 DM542 + 本机构上量过
 
 ### v2.4.1 (2026-09-27) — 管路寿命累计可清零
 
@@ -708,7 +947,7 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 删除 BLE、堵转检测与全部死代码（−1472 行）；清理两个文件的有损 mojibake；
 README 全面重写。三个 commit：`fa4cbee` / `523a773` / `b024a6e`，
 每个都单独编译验证，最终固件 1046196 bytes (33%)、内部 SRAM 静态 52840 bytes (16%)、
-本项目代码零警告。详见 [§5](#5-代码审查记录-2026-09-26)。
+本项目代码零警告。详见 [§5](#5-代码审查记录)。
 
 ### v2.3.8 (2026-07-30)
 

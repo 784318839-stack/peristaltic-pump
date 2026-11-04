@@ -26,8 +26,16 @@ void initResponseBuffer() {
   if (responseBuf) responseBuf[0] = '\0';
 }
 
+// PSRAM 与 malloc 双路都失败时 responseBuf 是 nullptr, 而下面四个 snprintf 站点会直接
+// snprintf(nullptr, ...) —— 那是 UB。buildTelemetryJson() 早就有 if (!telemetryBuf)
+// return "{}" 这层保护, 这里补齐, 两边标准要一致。1.5 KB 分配失败的概率极低, 但代价只是
+// 每个入口一行。用字符串常量而不是静态兜底缓冲: 后者要白占 1536 B BSS。
+static const char* const OOM_RESPONSE =
+    "{\"type\":\"response\",\"id\":\"?\",\"ok\":false,\"error\":\"response buffer OOM\"}";
+
 // 构造成功响应
 static const char* okResponse( const char* cmd, const char* dataJson = nullptr ) {
+  if ( !responseBuf ) return OOM_RESPONSE;
   if ( dataJson ) {
     snprintf( responseBuf, RESPONSE_BUF_SIZE,
               "{\"type\":\"response\",\"id\":\"%s\",\"ok\":true,\"data\":%s}", cmd, dataJson );
@@ -40,6 +48,7 @@ static const char* okResponse( const char* cmd, const char* dataJson = nullptr )
 
 // 构造错误响应
 static const char* errResponse( const char* cmd, const char* error ) {
+  if ( !responseBuf ) return OOM_RESPONSE;
   snprintf( responseBuf, RESPONSE_BUF_SIZE,
             "{\"type\":\"response\",\"id\":\"%s\",\"ok\":false,\"error\":\"%s\"}", cmd, error );
   return responseBuf;
@@ -50,6 +59,7 @@ const char* parseAndExecute( const char* json ) {
 
   DeserializationError err = deserializeJson( doc, json );
   if ( err ) {
+    if ( !responseBuf ) return OOM_RESPONSE;
     snprintf( responseBuf, RESPONSE_BUF_SIZE,
               "{\"type\":\"response\",\"id\":\"?\",\"ok\":false,\"error\":\"JSON parse: %s\"}",
               err.c_str() );
@@ -73,8 +83,11 @@ const char* parseAndExecute( const char* json ) {
     // 而 calibStep 还停在 CALIB_RUN, 随后 calib_start_run 又会重新 moveTo, 校准步数就废了
     if ( pump.currentMenu == CALIBRATE )
       return errResponse( cmd, "Use calib_start_run during calibration" );
-    if ( pump.mode == MODE_JET ) startJetCycle();
-    else startPump();
+    if ( pump.mode == MODE_JET ) {
+      if ( !startJetCycle() ) return errResponse( cmd, "Motor rejected speed/move (see serial)" );
+    } else {
+      if ( !startPump() ) return errResponse( cmd, "Motor rejected speed/move (see serial)" );
+    }
     return okResponse( cmd );
   }
 
@@ -86,17 +99,21 @@ const char* parseAndExecute( const char* json ) {
 
   if ( strcmp( cmd, "resume" ) == 0 ) {
     if ( pump.state != PAUSED ) return errResponse( cmd, "Pump not paused" );
-    resumePump();
+    if ( !resumePump() ) return errResponse( cmd, "Motor rejected speed/move (see serial)" );
     return okResponse( cmd );
   }
 
   if ( strcmp( cmd, "stop" ) == 0 || strcmp( cmd, "reset" ) == 0 ) {
+    // calibStopRun() 内部会把 pump.calibRunning 清成 false, 所以必须先存进局部变量:
+    // 直接写 !pump.calibRunning 的话, 从校准分支走过来时它已经是 false, 下面那道守卫
+    // 一次也拦不住, 与它自己的注释正好相反 (审查档案 N6)。
+    const bool wasCalib = pump.calibRunning;
     // 校准运行中要走 calibStopRun(): 它才会清 calibRunning, 否则电机停了但
     // 遥测仍按 calibTargetVol 算进度, 向导也一直卡在「运行中」那一步
-    if ( pump.calibRunning ) calibStopRun();
+    if ( wasCalib ) calibStopRun();
     else if ( pump.state == RUNNING || pump.state == PAUSED ) stopPump();
     // 校准运行时不碰喷射逻辑: 用户的 mode 可能就是 JET, 但这次运行与喷射无关
-    if ( pump.mode == MODE_JET && !pump.calibRunning ) stopJetCycle();
+    if ( pump.mode == MODE_JET && !wasCalib ) stopJetCycle();
     resetPump();
     pump.jetCount = 0;
     return okResponse( cmd );
@@ -240,7 +257,7 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "jet_start" ) == 0 ) {
     if ( pump.mode != MODE_JET ) return errResponse( cmd, "Not in jet mode" );
     if ( pump.state != STATE_IDLE ) return errResponse( cmd, "Pump not idle" );
-    startJetCycle();
+    if ( !startJetCycle() ) return errResponse( cmd, "Motor rejected speed/move (see serial)" );
     return okResponse( cmd );
   }
 
@@ -305,7 +322,7 @@ const char* parseAndExecute( const char* json ) {
   if ( strcmp( cmd, "calib_start_run" ) == 0 ) {
     if ( pump.currentMenu != CALIBRATE || pump.calibStep != CALIB_RUN )
       return errResponse( cmd, "Not at calib run step" );
-    calibStartRun();
+    if ( !calibStartRun() ) return errResponse( cmd, "Motor rejected speed/move (see serial)" );
     return okResponse( cmd );
   }
 
@@ -405,11 +422,22 @@ const char* parseAndExecute( const char* json ) {
     if ( pump.state != STATE_IDLE ) return errResponse( cmd, "Pump not idle" );
     if ( pump.currentMenu == CALIBRATE )   // 会把菜单改成 PRIME, 向导和强制的 VOLUME 模式就都回不来了
       return errResponse( cmd, "Cannot prime during calibration" );
+    Menu prevMenu = pump.currentMenu;
     pump.currentMenu = PRIME;
     ensureStepperOn();
-    applySpeed( flowRateToPPS( 1500.0 ), flowRateToPPS( 1500.0 ) );
+    // 排气速度写死 1500 mL/min 对应的 pps (= 25*stepsPerMl)。DM542 手册的脉冲上限是
+    // 200 kHz, 反推 stepsPerMl 上限 8000 —— 现实标定值 160~800 对应 4~20 kHz, 够不着,
+    // 但超限时 applySpeed 会返回 false, 下面这条就把菜单退回去而不是让泵空转
+    float primePps = flowRateToPPS( 1500.0 );
+    if ( !applySpeed( primePps, primePps ) ) {
+      pump.currentMenu = prevMenu;
+      return errResponse( cmd, "Motor rejected prime speed (see serial)" );
+    }
     stepper->setCurrentPosition( 0 );
-    stepper->moveTo( 999999999 );  /* 远超实际需要, MCPWM 硬件持续发脉冲直到 forceStop */
+    if ( !moveIsOk( stepper->moveTo( 999999999 ) ) ) {  /* 远超实际需要, MCPWM 硬件持续发脉冲直到 forceStop */
+      pump.currentMenu = prevMenu;
+      return errResponse( cmd, "Motor rejected prime move (see serial)" );
+    }
     pump.dispensedVolume = 0;
     pump.state = RUNNING;
     beepStart();
@@ -440,13 +468,20 @@ const char* parseAndExecute( const char* json ) {
 
   if ( strcmp( cmd, "get_state" ) == 0 ) {
     const char* telemetry = buildTelemetryJson();
+    if ( !responseBuf ) return OOM_RESPONSE;
     snprintf( responseBuf, RESPONSE_BUF_SIZE,
               "{\"type\":\"response\",\"id\":\"get_state\",\"ok\":true,\"data\":%s}", telemetry );
     return responseBuf;
   }
 
   if ( strcmp( cmd, "wifi_restart" ) == 0 ) {
-    restartWiFi();
+    // 不能在这里直接 restartWiFi(): parseAndExecute() 返回的是指向 responseBuf 的指针,
+    // 调用方 (web_handlers.cpp) 要等我们 return 之后才 sendJson + flush + stop。而
+    // restartWiFi() 会 softAPdisconnect(true) 把当前 SoftAP 拆掉 —— 经 HTTP 下发这条命令
+    // 时响应必然发不出去, 客户端只能等超时 (wifi_manager.h 的契约写的就是这件事)。
+    // 改成置标志, 由 loop() 在 handleWebClients() 返回 (即 client.flush()+stop() 之后)
+    // 再真正重启。/api/wifi 那条路径不需要这个: 它在 handler 内部就 flush 完了 (审查档案 A10)。
+    requestWifiRestart();
     beepConfirm();
     return okResponse( cmd );
   }

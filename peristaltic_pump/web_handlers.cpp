@@ -30,6 +30,18 @@ static WiFiServer server(80);
 // headers ~400B, 2KB 绰绰有余。
 #define REQ_BUF_SIZE 2048
 
+// 读请求的两个超时, 缺一不可:
+//   IDLE —— 每收到一个字节就续期, 用来等 body 到齐 (慢链路下 200ms 静默算断线)
+//   HARD —— 绝对上限, 不随收数据续期
+// 只有 IDLE 的话, 一个每 <200ms 吐 1 字节的客户端 (slowloris) 能把 loop() 无限期占住:
+// 循环里的 delay(1) 会喂狗, 所以不会 WDT 复位, 而是活锁 —— pump_machine_tick() /
+// buzzer_tick() / led_tick() / saveParams() 全部停摆。电机因为 MCPWM+PCNT 是硬件发脉冲
+// 仍在转, 于是变成「泵在跑但没人看着」: 完成检测、回吸、DONE→IDLE、EEPROM 落盘都不发生。
+// 合法请求的 body 最大 ~150B, 2s 已经是十几个数量级的余量; /api/scan 那 8s 阻塞发生在
+// 读完之后的 handleRequest() 里, 不受这个上限影响。
+#define REQ_IDLE_TIMEOUT_MS 200
+#define REQ_HARD_TIMEOUT_MS 2000
+
 // ============================================================================
 //                            辅助函数
 // ============================================================================
@@ -376,10 +388,13 @@ void handleWebClients() {
   int len = 0;
   int headerEnd = -1;
   int contentLength = 0;
-  unsigned long deadline = millis() + 200;
+  unsigned long start = millis();
+  unsigned long idleDeadline = start + REQ_IDLE_TIMEOUT_MS;
 
   buf[0] = '\0';
-  while (client.connected() && millis() < deadline && len < REQ_BUF_SIZE - 2) {
+  // 用 millis() - start 而不是 millis() < hardDeadline: 前者对 49.7 天的 millis() 回绕免疫
+  while (client.connected() && millis() < idleDeadline
+         && millis() - start < REQ_HARD_TIMEOUT_MS && len < REQ_BUF_SIZE - 2) {
     int avail = client.available();
     if (avail <= 0) { delay(1); continue; }
 
@@ -388,7 +403,7 @@ void handleWebClients() {
     if (n <= 0) break;
     len += n;
     buf[len] = '\0';
-    deadline = millis() + 200;            // 每次读到数据就重置超时
+    idleDeadline = millis() + REQ_IDLE_TIMEOUT_MS;   // 每次读到数据就重置静默超时
 
     if (headerEnd < 0) {
       headerEnd = findHeaderEnd(buf);

@@ -171,3 +171,19 @@ void restartWiFi() {
   delay(500);
   initWiFi();
 }
+
+static bool wifiRestartPending = false;
+
+void requestWifiRestart() { wifiRestartPending = true; }
+
+void serviceWifiRestart() {
+  if (!wifiRestartPending) return;
+  wifiRestartPending = false;
+  // 与 /api/wifi 那条路径 (审查档案 A10) 同一套: 先留一点时间让 lwIP 把已排队的响应字节
+  // 真的推上线, 再拆 SoftAP。这里的 flush/stop 已经在 handleWebClients() 里做完了,
+  // 但 TCP 发送是异步的, 200ms 是 A10 实测下来的量。
+  delay(200);
+  restartWiFi();   // 阻塞约 1s (delay(500) + initWiFi 里的 450ms)。这期间 loop() 不转,
+                   // pump_machine_tick() 停摆: 电机靠 MCPWM+PCNT 硬件继续发脉冲不受影响,
+                   // TIME 模式的 elapsed 走 millis() 也不漂, 只是完成检测/蜂鸣器/LED 晚 1s。
+}

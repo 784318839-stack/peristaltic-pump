@@ -23,11 +23,49 @@
     wifiMode: 'ap', wifiIP: '192.168.4.1', wifiClients: 1,
     elapsedMs: 0, pausedElapsedMs: 0, prime: false,
     jetSquirting: false, jetWaitMs: 0,
-    antiDripLeftMs: 0, doneLeftMs: 0, bootMs: 0
+    antiDripLeftMs: 0, antiDripCharged: 0, doneLeftMs: 0, bootMs: 0
   };
 
   /* 校准用的 stepsPerMl —— 与日常的 D.stepsPerMl 分开 (照抄 pump_core.cpp calibSPM()) */
   function calibSPM() { return D.liquidSPM[D.calibLiquid]; }
+
+  /* ---- 运动曲线模型 (照 pump_core.cpp applyFlowSpeed + FastAccelStepper 的梯形规划) ----
+     applyFlowSpeed() 给的加速度是 A = ACCEL_FACTOR*pps, 与目标速度成正比, 于是升到全速的
+     时间 t_ramp = v/A = 1/ACCEL_FACTOR ≈ 3.33 s 是个**与速度无关的常量**, 减速段同样长。
+     早先这里是理想积分器 (dispensed += flow*dt), 复现不出「定时模式的截断永远早于自然
+     完成、于是系统性少出液」—— 见 pump_core.cpp startPump() 与 README 审查档案 N1。
+     截断路径记多少管路寿命完全由 rampDispensed() 的返回值决定, 所以这段必须与固件同源。 */
+  var ACCEL_FACTOR = 0.3;                 /* 与 pump_shared.h 的 ACCEL_FACTOR 同源 */
+  var T_RAMP = 1 / ACCEL_FACTOR;          /* 3.333 s, 升速段 (= 减速段) */
+  /* 2*T_RAMP ≈ 6.667 s 只是梯形/三角形的**分支点** (在该总耗时上峰值速度恰好等于指令速度),
+     不是「最短耗时」。因为 A 与 v 成正比, 提速同时也提加速度, T(v) 全程单调递减, 没有下限 */
+  var T_MIN  = 2 / ACCEL_FACTOR;
+
+  /* 匀速段流量 mLmin、目标体积 total, 返回 t 秒时的实际出液量 (mL)。
+     total <= 0 表示没有终点 (排气 / 喷射), 退化成匀速积分。 */
+  function rampDispensed(mLmin, tSec, total) {
+    var v = mLmin / 60;                                    /* mL/s */
+    if (!(v > 0) || !(tSec > 0)) return 0;
+    if (!(total > 0)) return v * tSec;
+    var A = v / T_RAMP;                                    /* mL/s², = ACCEL_FACTOR*v */
+    var vp, T;
+    if (total >= v * T_RAMP) { vp = v; T = total / v + T_RAMP; }        /* 梯形: 到得了全速 */
+    else { vp = Math.sqrt(total * A); T = 2 * vp / A; }                 /* 三角形: 到不了 */
+    if (tSec >= T) return total;
+    var tAcc = vp / A;                                     /* 梯形=T_RAMP, 三角形=T/2 */
+    if (tSec <= tAcc) return 0.5 * A * tSec * tSec;
+    if (tSec <= T - tAcc) return vp * (tSec - tAcc / 2);
+    var r = T - tSec;
+    return total - 0.5 * A * r * r;
+  }
+
+  /* 跑完 total 毫升需要的总秒数 —— 梯形是 total/v + T_RAMP, 三角形恒为 T_MIN */
+  function runDurationSec(mLmin, total) {
+    var v = mLmin / 60;
+    if (!(v > 0) || !(total > 0)) return 0;
+    var A = v / T_RAMP;
+    return (total >= v * T_RAMP) ? total / v + T_RAMP : 2 * Math.sqrt(total / A);
+  }
 
   /* ---- 日志 ---- */
   function log(cls, txt) {
@@ -88,7 +126,7 @@
         /* 校准按 calibFlowRate 跑 (calibStartRun 已把它写进 activeFlowRate),
            步数按 calibSPM() 算, 与日常的 flowRate / stepsPerMl 无关 */
         D.elapsedMs += dt;
-        D.dispensed += D.activeFlowRate * dt / 60000;
+        D.dispensed = rampDispensed(D.activeFlowRate, D.elapsedMs / 1000, D.calibTargetVol);
         if (D.dispensed >= D.calibTargetVol) {
           D.dispensed = D.calibTargetVol;
           D.calibStepsRun = Math.round(D.calibTargetVol * calibSPM());
@@ -114,29 +152,39 @@
         return;
       }
       D.elapsedMs += dt;
-      D.dispensed += D.activeFlowRate * dt / 60000;
-      var timeUp = (D.mode === 'TIME') && (D.elapsedMs / 1000 >= D.targetTime + 1);
-      if (D.dispensed >= D.targetVolume || timeUp) {
-        D.dispensed = Math.min(D.dispensed, D.targetVolume);
-        finishRun();
+      D.dispensed = rampDispensed(D.activeFlowRate, D.elapsedMs / 1000, D.targetVolume);
+      /* 截断条件照抄 pump_machine.cpp tick_running(): pumpElapsed >= pumpDuration + 1,
+         其中 pumpElapsed 是整数秒 (millis() 差 / 1000), 所以这里也要 floor */
+      var timeUp = (D.mode === 'TIME') && (Math.floor(D.elapsedMs / 1000) >= D.targetTime + 1);
+      if (D.dispensed >= D.targetVolume) {
+        D.dispensed = D.targetVolume;
+        finishRun(D.targetVolume);                 /* 跑完全程, 记满额 */
+      } else if (timeUp) {
+        /* 没跑完就被截断 —— 流量被 1600 mL/min 钳住, 或 targetTime 短于 T_MIN ≈ 6.67 s 的
+           三角形曲线物理下限。按实际出液量记账, 记满额会让管路寿命虚高 (审查档案 N1)。 */
+        log('t', '  ↳ TIME 截断: 实际 ' + D.dispensed.toFixed(2) + ' / ' + D.targetVolume + ' mL');
+        finishRun(D.dispensed);
       }
     } else if (D.state === 'ANTI_DRIP') {
       D.antiDripLeftMs -= dt;
-      if (D.antiDripLeftMs <= 0) { D.totalDispensed += D.targetVolume; enterDone(); }
+      if (D.antiDripLeftMs <= 0) { D.totalDispensed += D.antiDripCharged; enterDone(); }
     } else if (D.state === 'DONE') {
       D.doneLeftMs -= dt;                 /* DONE_HOLD_MS = 2000 */
       if (D.doneLeftMs <= 0) { D.state = 'IDLE'; D.dispensed = 0; log('t', '  ↳ DONE → IDLE (2s 到期)'); }
     }
   }
 
-  function finishRun() {
+  /* charged = 本次要记进管路寿命的毫升数。正常跑完就是 targetVolume; TIME 模式被截断时
+     是实际出液量 —— 与 pump_machine.cpp tick_running() 的两条路径一一对应 */
+  function finishRun(charged) {
     if (D.antiDripVol > 0) {
       D.state = 'ANTI_DRIP';
+      D.antiDripCharged = charged;
       /* 回吸以 0.3× 速度反转 antiDripVol 毫升 */
       D.antiDripLeftMs = D.antiDripVol / Math.max(0.001, D.activeFlowRate * 0.3) * 60000;
       log('t', '  ↳ 完成 → ANTI_DRIP 回吸 ' + D.antiDripVol + ' mL');
     } else {
-      D.totalDispensed += D.targetVolume;
+      D.totalDispensed += charged;
       enterDone();
     }
   }
@@ -168,7 +216,16 @@
         } else {
           if (D.mode === 'TIME') {
             if (D.targetVolume <= 0 || D.targetTime <= 0) return err(cmd, 'Invalid target');
-            D.activeFlowRate = Math.min(1600, Math.max(0.1, D.targetVolume / (D.targetTime / 60)));
+            /* 与 pump_core.cpp startPump() 逐字对应: 反解「总耗时正好 = targetTime」需要的
+               匀速段流量。梯形支 (T >= 2*T_RAMP) v = N/(T - T_RAMP); 三角形支 v = 4*N*T_RAMP/T²。
+               T 对 v 全程单调递减 (A 与 v 成正比), 所以没有「最短耗时」下限, 唯一限制是 1600 钳位;
+               被钳住时由截断兜底, 并按实际出液量记账 */
+            var mLmin = (D.targetTime >= 2 * T_RAMP)
+                      ? D.targetVolume * 60 / (D.targetTime - T_RAMP)
+                      : D.targetVolume * 240 * T_RAMP / (D.targetTime * D.targetTime);
+            D.activeFlowRate = Math.min(1600, Math.max(0.1, mLmin));
+            log('t', '  ↳ TIME 斜坡补偿: ' + D.activeFlowRate.toFixed(2) + ' mL/min' +
+                     ' (总耗时 ' + runDurationSec(D.activeFlowRate, D.targetVolume).toFixed(2) + ' s / 目标 ' + D.targetTime + ' s)');
           } else {
             if (D.flowRate <= 0 || D.targetVolume <= 0) return err(cmd, 'Invalid target');
             D.activeFlowRate = D.flowRate;

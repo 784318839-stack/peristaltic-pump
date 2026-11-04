@@ -27,7 +27,9 @@ const ui = uiBlocks[0];
 /* expose internals + stop the wall-clock ticker so time is driven deterministically */
 const tail = '})();';
 if (!sim.endsWith(tail)) { console.error('sim IIFE tail not found'); process.exit(1); }
-sim = sim.slice(0, -tail.length) + 'window.__sim = { D: D, tick: tick, exec: exec, telemetry: telemetry }; })();';
+sim = sim.slice(0, -tail.length) + 'window.__sim = { D: D, tick: tick, exec: exec, telemetry: telemetry,' +
+  ' rampDispensed: rampDispensed, runDurationSec: runDurationSec,' +
+  ' ACCEL_FACTOR: ACCEL_FACTOR, T_RAMP: T_RAMP, T_MIN: T_MIN }; })();';
 
 const logs = [];
 global.document = {
@@ -148,7 +150,11 @@ ck('telemetry calibLiquid=1', t.calibLiquid === 1, t.calibLiquid);
 ck('telemetry flow is still the daily 123', t.flow === before.flowRate, t.flow);
 advance(3000);
 t = S.telemetry();
-ck('calib dispensed ≈ 800 mL/min × 3 s = 40 mL', Math.abs(t.dispensed - 40) < 1.5, t.dispensed);
+/* 3 s 时还在升速段 (T_RAMP = 1/ACCEL_FACTOR ≈ 3.33 s), 平均流量只有峰值的一半:
+   A = (800/60)/T_RAMP = 4 mL/s² ⇒ 0.5*A*t² = 18 mL, 不是理想积分的 40 mL。
+   sim 早先是理想积分器, 所以复现不出「定时模式少出液」(审查档案 N1)。 */
+ck('calib dispensed 跟随升速曲线 ≈ 18 mL (3 s 仍在加速段)', Math.abs(t.dispensed - 18) < 0.5, t.dispensed);
+ck('calib dispensed 明显少于理想积分的 40 mL', t.dispensed < 30, t.dispensed);
 ck('calib progress uses calibTargetVol as denominator',
    t.progress === Math.min(100, Math.floor(t.dispensed / t.calibTargetVol * 100)), { p: t.progress, disp: t.dispensed });
 
@@ -156,10 +162,14 @@ ck('calib progress uses calibTargetVol as denominator',
 cmd('stop');
 ck('stop clears calibRunning', S.D.calibRunning === false, S.D.calibRunning);
 ck('stop leaves calibStep at 3 (CALIB_RUN)', S.D.calibStep === 3, S.D.calibStep);
-ck('stop recorded steps with calibSPM', S.D.calibStepsRun === Math.round(40 * S.D.liquidSPM[1]) || S.D.calibStepsRun > 0, S.D.calibStepsRun);
+ck('stop recorded steps with calibSPM',
+   S.D.calibStepsRun === Math.round(S.rampDispensed(800, 3, 100) * S.D.liquidSPM[1]),
+   { got: S.D.calibStepsRun, expect: Math.round(S.rampDispensed(800, 3, 100) * S.D.liquidSPM[1]) });
 
 cmd('calib_start_run');
-advance(8000);   /* 100 mL @ 800 mL/min = 7.5 s，再等 0.5 s（DONE 保持 2 s 后才回 IDLE） */
+/* 100 mL @ 800 mL/min: 总耗时 = total/v + T_RAMP = 7.5 + 3.33 ≈ 10.83 s (减速段与升速段等长)。
+   等 11.5 s: 跑完了, 但还没超过 DONE 的 2 s 保持期, 下面才能断言 state === 'DONE' */
+advance(11500);
 ck('calib run finished → CALIB_MEASURE (4)', S.D.calibStep === 4, S.D.calibStep);
 ck('calibRunning cleared after finish', S.D.calibRunning === false, S.D.calibRunning);
 ck('state DONE right after the calib run', S.D.state === 'DONE', S.D.state);
@@ -215,7 +225,7 @@ cmd('set_tube_life', { v: 100 });
 const preTube = snap();
 const baseTotal = S.D.totalDispensed;
 cmd('start');
-advance(20000);            /* 10 mL @ 123 mL/min ≈ 4.9 s + 回吸 0.08 s + DONE 2 s */
+advance(20000);            /* 10 mL @ 123 mL/min: 匀速 4.88 s + T_RAMP 3.33 s + 回吸 0.08 s + DONE 2 s */
 ck('a completed run adds targetVolume to totalDispensed',
    Math.abs(S.D.totalDispensed - (baseTotal + 10)) < 0.001, { now: S.D.totalDispensed, baseTotal });
 ck('tubePct > 0 before the reset', S.telemetry().tubePct > 0, S.telemetry().tubePct);
@@ -239,6 +249,77 @@ ck('the in-flight dispense still counts after the reset',
 cmd('set_tube_life', { v: 50000 });
 cmd('reset_tube_life');
 ck('tubeLifeML restored for the following sections', S.D.tubeLifeML === 50000, S.D.tubeLifeML);
+
+/* ---------- I. TIME 模式: 斜坡补偿 + 截断按实际出液量记账 (审查档案 N1) ---------- */
+cmd('set_anti_drip', { v: 0 });        /* 排除回吸, totalDispensed 才可直接比对 */
+cmd('set_mode', { m: 'TIME' });
+
+/* I-0 回归护栏: 说明这个补偿为什么必须存在。修复前 activeFlowRate = V*60/T,
+       对应的总耗时是 V/v + T_RAMP = T + 3.33 s, 永远晚于 T+1 s 的截断点。 */
+ck('修复前的流量 (V*60/T) 会让自然完成晚于截断点',
+   S.runDurationSec(45 * 60 / 60, 45) > 61, S.runDurationSec(45, 45));
+
+/* I-1 梯形支 (targetTime >= 2*T_RAMP): 补偿后总耗时正好落回 targetTime, 自然完成, 记满额 */
+cmd('set_volume', { v: 45 });
+cmd('set_time', { v: 60 });
+ck('TIME start ok', cmd('start').ok);
+/* 固件公式 v = V*60/(T - 1/ACCEL_FACTOR), 见 pump_core.cpp startPump() */
+ck('activeFlowRate 已按升速段补偿 (> 朴素的 V*60/T = 45)',
+   Math.abs(S.D.activeFlowRate - 45 * 60 / (60 - S.T_RAMP)) < 0.01 && S.D.activeFlowRate > 45,
+   S.D.activeFlowRate);
+ck('补偿后跑完 45 mL 的总耗时正好 = targetTime 60 s',
+   Math.abs(S.runDurationSec(S.D.activeFlowRate, 45) - 60) < 0.01,
+   S.runDurationSec(S.D.activeFlowRate, 45));
+const baseI1 = S.D.totalDispensed;
+advance(63000);                        /* 60 s 跑完 + DONE 保持 2 s → 回 IDLE */
+ck('梯形支走自然完成 (没被截断), 记满额 45 mL',
+   Math.abs(S.D.totalDispensed - (baseI1 + 45)) < 0.01, { now: S.D.totalDispensed, base: baseI1 });
+ck('I-1 结束后回到 IDLE', S.D.state === 'IDLE', S.D.state);
+
+/* I-2 三角形支 (targetTime < 2*T_RAMP ≈ 6.67 s): 到不了全速, 但 A 与 v 成正比 ⇒ 提速同时
+       提加速度, T(v) = 2*sqrt(N*T_RAMP/v) 仍单调递减, 所以照样能精确命中 targetTime。
+       (这里曾经错写成「顶到 V*60*ACCEL_FACTOR」, 那个速度偏慢, 3 s 档反而从 -27% 恶化到 -32%) */
+cmd('set_volume', { v: 10 });
+cmd('set_time', { v: 3 });
+ck('TIME start ok (三角形支)', cmd('start').ok);
+ck('三角形支流量 = 4*V*60*T_RAMP/T² ≈ 888.9 mL/min',
+   Math.abs(S.D.activeFlowRate - 10 * 240 * S.T_RAMP / 9) < 0.1, S.D.activeFlowRate);
+ck('三角形支的总耗时也正好 = targetTime 3 s',
+   Math.abs(S.runDurationSec(S.D.activeFlowRate, 10) - 3) < 0.01,
+   S.runDurationSec(S.D.activeFlowRate, 10));
+const baseI2 = S.D.totalDispensed;
+advance(5500);                         /* 3 s 跑完 + DONE 2 s → IDLE */
+ck('三角形支同样走自然完成, 记满额 10 mL',
+   Math.abs(S.D.totalDispensed - (baseI2 + 10)) < 0.01, { now: S.D.totalDispensed, base: baseI2 });
+ck('I-2 结束后回到 IDLE', S.D.state === 'IDLE', S.D.state);
+
+/* I-3 真正不可达的档位: 需要的流量超过 1600 mL/min 被 constrain 钳住 ⇒ 截断兜底。
+       这条才是「按实际出液量记账」真正生效的地方 —— 旧代码在这里记满额, 管路寿命虚高一倍。 */
+cmd('set_volume', { v: 500 });
+cmd('set_time', { v: 10 });             /* 需要 500*60/(10-3.33) = 4500 mL/min, 远超上限 */
+ck('TIME start ok (clamped)', cmd('start').ok);
+ck('流量被钳在 1600 mL/min', S.D.activeFlowRate === 1600, S.D.activeFlowRate);
+ck('钳位后跑完 500 mL 要 22.08 s, 远晚于 11 s 的截断点',
+   Math.abs(S.runDurationSec(1600, 500) - (500 / (1600 / 60) + S.T_RAMP)) < 0.01 &&
+   S.runDurationSec(1600, 500) > 11, S.runDurationSec(1600, 500));
+const baseI3 = S.D.totalDispensed;
+advance(11500);                        /* 截断在 targetTime+1 = 11 s */
+const charged = S.D.totalDispensed - baseI3;
+ck('截断触发时按实际出液量记账, 远少于 targetVolume', charged > 0 && charged < 260,
+   { charged, targetVolume: 500 });
+ck('记账量 = 截断时刻的实际出液量 (≈248.9 mL, 不是 500)',
+   Math.abs(charged - S.rampDispensed(1600, 11, 500)) < 0.5 && Math.abs(charged - 248.9) < 1.0,
+   { charged, expect: S.rampDispensed(1600, 11, 500) });
+ck('截断后 state = DONE', S.D.state === 'DONE', S.D.state);
+advance(2000);                         /* 让 DONE 到期回 IDLE, 后面 calib_enter 才收 */
+ck('I-3 结束后回到 IDLE', S.D.state === 'IDLE', S.D.state);
+
+/* 还原给后面的 section */
+cmd('set_anti_drip', { v: 0.05 });
+cmd('set_mode', { m: 'VOLUME' });
+cmd('set_volume', { v: 10 });
+cmd('set_time', { v: 30 });
+cmd('reset_tube_life');
 
 /* ---------- G. HTTP query parsing of &f= ---------- */
 cmd('calib_enter');

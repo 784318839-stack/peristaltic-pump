@@ -39,6 +39,13 @@ void saveWiFiConfig(const WiFiConfig& cfg);
 // 注意: 会拆掉当前 SoftAP, 调用方必须先把 HTTP 响应发完再调
 void restartWiFi();
 
+// 延迟重启: requestWifiRestart() 只置标志, serviceWifiRestart() 在 loop() 里、
+// handleWebClients() 返回之后 (即 client.flush()+stop() 之后) 才真正执行。
+// parseAndExecute() 里的 wifi_restart 命令必须走这一对 —— 它返回的是指向 responseBuf 的
+// 指针, 响应要等它 return 之后才发得出去, 在那之前拆 SoftAP 响应就丢了。
+void requestWifiRestart();
+void serviceWifiRestart();
+
 // 默认 SoftAP 配置
 #define WIFI_AP_SSID_PREFIX "PumpCtrl-"
 #define WIFI_AP_PASSWORD    "12345678"

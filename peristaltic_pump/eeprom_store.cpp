@@ -1,11 +1,51 @@
-﻿// eeprom_store.cpp - EEPROM layout, save/load
+﻿/******************************************************************************
+ * eeprom_store.cpp - EEPROM 布局 / 存 / 取
+ *
+ * EEPROM.begin(512) (见 peristaltic_pump.ino)。ESP32 的 EEPROM 库是 NVS 上的一整块
+ * 512 B 镜像: put/write 只改 RAM 镜像, commit() 才整块落盘 —— 所以 saveParams() 与
+ * saveWiFiConfig() 虽然各管一段, 落盘是同一块, 不会互相覆盖。
+ *
+ * 布局 (偏移 = EEPROM_ADDR + n, EEPROM_ADDR 为 0):
+ *
+ *   泵参数 —— 本文件, 共 64 B
+ *     0    2  uint16   EEPROM_MAGIC (0x5061, 定义在 pump_shared.h)
+ *     2    4  float    stepsPerMl        ← 遗留字段, 见下方说明
+ *     6    4  float    flowRate
+ *    10    4  float    targetVolume
+ *    14    4  float    targetTime
+ *    18    1  uint8    mode (PumpMode)
+ *    19    4  float    antiDripVol
+ *    23    4  float    totalDispensed
+ *    27    4  float    tubeLifeML
+ *    31    4  float    jetVolume
+ *    35    4  float    jetInterval
+ *    39    4  float    jetFlowRate
+ *    43   16  float[4] liquidSPM[NUM_LIQUIDS]   (43 / 47 / 51 / 55)
+ *    59    1  uint8    currentLiquid
+ *    60    4  float    jetPressure
+ *    64  ---           泵参数到此结束
+ *
+ *   WiFi 配置 —— wifi_manager.cpp, 共 99 B (WIFI_EEPROM_BASE = 184)
+ *   184    2  uint16   WIFI_EEPROM_MAGIC (0x5746 "WF")
+ *   186   32  char[]   ssid   (明文)
+ *   218   64  char[]   pass   (按本机 MAC 做 XOR; 是混淆不是加密, 见 README 审查档案 B7)
+ *   282    1  uint8    mode   (0=仅AP / 1=STA+AP回退)
+ *   283  ---           WiFi 到此结束
+ *
+ *   64–183 与 283–511 是未用空洞。改布局前先确认没有跨段重叠。
+ *
+ * offset 2 的 stepsPerMl 是**遗留字段**: loadParams() 末尾一定会用
+ * pump.stepsPerMl = pump.liquidSPM[pump.currentLiquid] 覆盖它, 所以读出来的值永远用不上。
+ * 仍然照写, 是为了让降级回旧固件 (那时还没有 liquidSPM[]) 的板子能读到正确的 spm。
+ * 不要拿它当「当前 spm」的权威来源。
+ ******************************************************************************/
 #include "eeprom_store.h"
 #include "pump_shared.h"
 #include "pump_state.h"
 #include <EEPROM.h>
 
-#define EEPROM_MAGIC  0x5061  // v4.2: 400 pulse/rev 细分 (revert from 1600)
-#define EEPROM_ADDR   0
+// EEPROM_MAGIC / EEPROM_ADDR 由 pump_shared.h 统一提供, 这里不再重复定义
+// (原先两处各写一份, 值相同所以合法不报警, 但是双份维护)
 
 void markDirty() { pump.eepromDirty = true; }
 

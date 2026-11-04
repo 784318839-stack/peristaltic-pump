@@ -1,4 +1,4 @@
-﻿/******************************************************************************
+/******************************************************************************
  * Peristaltic Pump Controller v3 — YZ1515 precision dispensing / jet workstation
  * Hardware: ESP32-S3-WROOM-1-N16 (16 MB Flash)
  * v2.3.2: PumpState struct extracted, pump_machine state machine module, cleaner architecture
@@ -87,4 +87,9 @@ void loop() {
   pump_machine_tick();
 
   if (pump.eepromDirty && (pump.state == STATE_IDLE || pump.state == DONE)) saveParams();
+
+  // wifi_restart 命令的延迟执行点。必须排在 handleWebClients() 之后 —— 那时响应已经
+  // flush + stop 过, 拆 SoftAP 才不会把响应吞掉; 也排在 tick / saveParams 之后, 让它们
+  // 先各转一轮再阻塞约 1.2 s。详见 wifi_manager.h 的 requestWifiRestart() 说明。
+  serviceWifiRestart();
 }

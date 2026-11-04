@@ -17,8 +17,8 @@ float flowRateToPPS( float mLmin );
 // 返回 false 表示设置失败 (未接步进 / 超出驱动器范围)。
 bool applySpeed( float pps, float accel );
 
-// 按 mL/min 设定速度 (内部换算成 pps 后调 applySpeed)
-void  applyFlowSpeed( float mLmin );
+// 按 mL/min 设定速度 (内部换算成 pps 后调 applySpeed), 透传其成功与否
+bool  applyFlowSpeed( float mLmin );
 
 // 用「用户设定的流量」更新速度 —— 待机 / set_flow 用这个。
 // 运行中请用 applyFlowSpeed(pump.activeFlowRate), TIME 模式下两者不同;
@@ -29,15 +29,20 @@ void  updateStepperSpeed();
 void ensureStepperOn();
 
 // ---- 泵状态机 ----
-void startPump();
+// startPump / resumePump / startJetSquirt / startJetCycle / calibStartRun 返回 false 表示
+// 电机参数被库拒绝 (setSpeedInMilliHz / setAcceleration / moveTo), 此时**不会**进入 RUNNING。
+// 调用方必须回 ok:false —— 否则状态机看到 isRunning()==false 就当作已经跑完, 于是上报
+// "分液完成" 并把 targetVolume 记进管路寿命。applySpeed() 内部早已检查过库的返回值并打了
+// 日志, 但它的 bool 一度被所有调用方丢弃, 于是那条路径仍然可达 (README 审查档案 A3 / N2)。
+bool startPump();
 void stopPump();
 void pausePump();
-void resumePump();
+bool resumePump();
 void resetPump();
 
 // ---- 喷射模式 ----
-void startJetSquirt();
-void startJetCycle();
+bool startJetSquirt();
+bool startJetCycle();
 void stopJetCycle();
 
 // ---- 液体选择 ----
@@ -51,7 +56,8 @@ void calibEnter();
 void calibLeave();
 // 本次校准用的 stepsPerMl —— 取自向导第 1 步选的 calibLiquid, 不是日常那个
 float calibSPM();
-void calibStartRun();
+bool calibStartRun();
+// 中途停止校准运行: forceStop() 后轮询到真停再读 getCurrentPosition(), 与 pausePump() 同一套
 void calibStopRun();
 void calibFinishRun();
 // 返回 false 表示算不出有效 stepsPerMl (电机没转 / 读数为 0), 调用方必须报错而不是继续
