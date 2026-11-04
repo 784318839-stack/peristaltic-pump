@@ -1,6 +1,6 @@
 # 蠕动泵控制器 — YZ1515 精密点液 / 喷射工作站（DM542 版）
 
-> `master` = **DM542 驱动版本，v2.4.2**，本仓库唯一的分支。
+> `master` = **DM542 驱动版本，v2.4.3**，本仓库唯一的分支。
 >
 > 2026-09-26 起对本分支做了一轮维护：**维护性审查**（修构建阻塞 + 删死代码 + 修 16 处缺陷）
 > 和 **校准向导重构 + 定时模式倒计时**（= v2.4.0），详见
@@ -418,12 +418,12 @@ ESP32 Arduino core **3.3.10**。其余 `WiFi.h` / `ESPmDNS.h` / `EEPROM.h` / `es
 
 ### 资源占用（实测）
 
-v2.4.2，走 Arduino IDE / arduino-cli 路径
+v2.4.3，走 Arduino IDE / arduino-cli 路径
 （`esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=huge_app`，core 3.3.11 +
 本机 Arduino 库目录里的 FastAccelStepper **1.4.0**，`--warnings all`）：
 
 ```
-Sketch uses 1043416 bytes (33%) of program storage space. Maximum is 3145728 bytes.
+Sketch uses 1043392 bytes (33%) of program storage space. Maximum is 3145728 bytes.
 Global variables use 53076 bytes (16%) of dynamic memory, leaving 274604 bytes for local variables.
 ```
 
@@ -432,10 +432,10 @@ Global variables use 53076 bytes (16%) of dynamic memory, leaving 274604 bytes f
 
 ```
 RAM:   16.2% (used 53076 bytes from 327680 bytes)
-Flash: 33.8% (used 1064080 bytes from 3145728 bytes)
+Flash: 33.8% (used 1064052 bytes from 3145728 bytes)
 ```
 
-两条路径的 **RAM 完全一致（53076 B）**，flash 差 20664 B，主要来自 FastAccelStepper 的
+两条路径的 **RAM 完全一致（53076 B）**，flash 差 20660 B，主要来自 FastAccelStepper 的
 库版本（1.4.0 vs 1.2.7）；两边工具链细节未逐项归因。历史对照可佐证「差在库不在构建系统」：
 v2.4.1 时 IDE 路径（core 3.3.10 + FAS 1.2.7）是 1051716 B / 52848 B，2026-10-05 用
 core 3.3.11 + FAS 1.4.0 复测**同一条 IDE 路径**降到 1042168 B / 53068 B —— 光换库版本
@@ -481,8 +481,7 @@ peristaltic-pump/                 # 仓库根 (master 分支)
 │   ├── index.html                # Web UI 源文件（编辑入口）
 │   ├── generate_web_ui.py        # index.html → web_ui_gen.h
 │   └── web_ui_gen.h              # 生成文件，勿手改
-├── pump_cli.py                   # Python CLI 控制工具（tools/ 下有一份完全相同的副本）
-├── tools/pump_cli.py
+├── pump_cli.py                   # Python CLI 控制工具（串口 / HTTP 发 JSON 命令）
 ├── tools/make_ui_preview.py      # index.html + 模板 + 模拟后端 → 单文件 UI 预览
 ├── tools/ui_preview_template.html# 预览外壳（四个 {{...}} 占位符）
 ├── tools/ui_preview_sim.js       # 预览用的模拟后端（照固件语义手写，不参与构建）
@@ -556,7 +555,7 @@ node   tools/test_ui_preview_sim.js         # 111 条断言：模拟后端与固
 
 **第二轮（2026-11-04，N 组）** 是在 v2.4.1 基线（`.ino` 与 tag 逐字节相同，仅去 BOM）上的
 复审：A1–A23 全部核对过、均已落地且描述准确，另发现 9 条档案之外的新问题，见本节末的
-「N 组」表格，修复落在 v2.4.2。
+「N 组」表格。N1–N6 + N8 的修复落在 v2.4.2，N7 + N9 落在 v2.4.3。
 
 ### A 组：已修复的缺陷
 
@@ -631,7 +630,7 @@ UI 显示「已分液 10.0 mL」，实际一滴未出。
 | **B2** | `/api/cmd` 拼 JSON 不转义不校验 | `cmd` / `v` / `s` / `m` / `i` 直接字符串拼接。实际危害有限（`parseAndExecute` 只 `strcmp` 已知命令，畸形 JSON 会解析失败），但属于未净化输入进 JSON 构造器。与 B1 一起决定 |
 | **B3** | `stepperEnabled` 恒为 `true` | 删除堵转检测后没有任何地方会置 false（ENA 本来也「未接，方案D」）。仍被遥测与 `index.html` 的「使能/断电」显示消费，删除会改遥测 schema |
 | **B4** | EEPROM 写放大 | 每 10 次分液 commit 一次全量 64 B；JET `interval=1s` 时约每 10 s 一次 NVS 写。24/7 运行的磨损需评估 |
-| **B5** | `pump_cli.py` 两份完全相同的副本 | 根目录与 `tools/` 各一份（hash 一致），留哪份待定 |
+| **B5** | `pump_cli.py` 两份完全相同的副本 | 根目录与 `tools/` 各一份（`fc /b` 逐字节一致）。**已于 v2.4.3 决定：留根目录、`git rm tools/pump_cli.py`**（README §4 的项目结构树与命令行工具一节都只提根目录那份，无需再改） |
 | **B6** | 四个无人调用的协议命令 | `menu_main` / `jet_start` / `jet_stop` / `reset`，前端和 CLI 都不发，但属 README 记载的协议命令，外部工具可能在用，故保留 |
 | **B7** | XOR「加密」只是混淆 | 密钥是 eFuse MAC，而 AP SSID 会把其中 2 字节广播出去。旧注释「拆机读 EEPROM 也是乱码」言过其实 |
 
@@ -682,7 +681,10 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 
 对全仓库做的一轮独立复审，编号与上面的 A/B/C/D 并列。基线是 v2.4.1（`.ino` 与 tag
 逐字节相同，仅去 BOM），A1–A23 全部核对过、**均已落地且描述准确**；下面是档案之外的新发现。
-详细机理与量化见 §6 的 v2.4.2 条目。
+
+落地版本：**N1–N6 + N8 在 v2.4.2**（详细机理与量化见 §6 的 v2.4.2 条目）；
+**N7 + N9 在 v2.4.2 之后**（见 §6 的 v2.4.3 条目）。9 条现已全部处理完，
+剩下的开放项都在 B 组（产品决策）里。
 
 | # | 问题 | 修法 / 现状 |
 |---|---|---|
@@ -692,17 +694,21 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 | **N4** | `handleWebClients()` 只有一个「每收到数据就续 200 ms」的静默超时 ⇒ 一个每 <200 ms 吐 1 字节的客户端能把 `loop()` 无限期占住。`delay(1)` 会喂狗所以不是 WDT 复位而是**活锁**：状态机 / 蜂鸣器 / LED / EEPROM 落盘全停摆，而电机靠 MCPWM+PCNT 硬件继续发脉冲 | ✅ 加 `REQ_HARD_TIMEOUT_MS = 2000` 绝对上限，用 `millis()-start` 的写法免回绕 |
 | **N5** | `(int32_t)(targetVolume × stepsPerMl)` 溢出：上界 `99999 × 50000 = 5e9 > INT32_MAX`，而超范围的 float→int32 是 **UB 不是回绕**。可达链条：`calib_measure` 只校验 `val > 0`，「0.1 mL / 3000 步」就能把 spm 标到 30000，再配 `targetVolume ≥ 71583` | ✅ `startPump()` / `calibStartRun()` 在动电机之前判界并拒绝。喷射与回吸经算不会越界，未加 |
 | **N6** | `stop` / `reset` 里 `!pump.calibRunning` 是**死守卫**：`calibStopRun()` 已经把它清成 false，守卫在其后才求值，从校准分支过来时恒为真，与它自己的注释相反。今天实际危害为零，但意图与行为不符 | ✅ 先把标志存进 `const bool wasCalib` |
-| **N7** | `prime_start` 不设 `pump.pumpStartMs`，而 `pause` 在 PRIME 期间是放行的（只校验 `state == RUNNING`）⇒ TIME 模式下 `pausePump()` 会用陈旧的 `pumpStartMs` 算 `pausedElapsedSec`，`resumePump()` 再据此回绕 `pumpStartMs`；`pausedRemainingSteps` 也会变成约 1e9（来自 `moveTo(999999999)`）。不影响出液量，但遥测 `elapsed`/`progress` 显示垃圾。另：排气速度写死 `flowRateToPPS(1500.0)`，忽略用户 `flowRate` | ⬜ **未修**（产品语义待定：排气期间到底该不该允许 pause） |
+| **N7** | `prime_start` 不设 `pump.pumpStartMs`，而 `pause` 在 PRIME 期间是放行的（只校验 `state == RUNNING`）⇒ TIME 模式下 `pausePump()` 会用陈旧的 `pumpStartMs` 算 `pausedElapsedSec`，`resumePump()` 再据此回绕 `pumpStartMs`；`pausedRemainingSteps` 也会变成约 1e9（来自 `moveTo(999999999)`）。不影响出液量，但遥测 `elapsed`/`progress` 显示垃圾。另：排气速度写死 `flowRateToPPS(1500.0)`，忽略用户 `flowRate` | ✅ `prime_start` 补 `pump.pumpStartMs = millis()`。**没有**改成「排气期间拒绝 pause」—— UI 在 PRIME 时暂停键是亮的（`index.html` 只看 `d.state==RUNNING`、不看 menu），拒绝会让按钮亮着却报错。补上起始时刻后 pause/resume 在排气期间语义正确，而 `pausedRemainingSteps ≈ 1e9` 恰恰是想要的（resume 后继续无限跑）。排气速度写死 1500 属设计意图，未改（DM542 200 kHz 上限反推 spm ≤ 8000，现实标定 160–800 对应 4–20 kHz，够不着） |
 | **N8** | 三处一致性：① `wifi_restart` 在 `parseAndExecute()` 里直接调 `restartWiFi()`，违反 `wifi_manager.h` 自己的契约，经 HTTP 下发时响应必丢（A10 只修了 `/api/wifi`）；② `okResponse`/`errResponse` 等 4 处 `snprintf(responseBuf,…)` 无 nullptr 保护，而 `buildTelemetryJson()` 有；③ `EEPROM_MAGIC`/`EEPROM_ADDR` 双份定义，`eeprom_store.h` 指向一个不存在的布局注释，offset 2 的 `stepsPerMl` 是永被覆盖的死字段 | ✅ ①改延迟执行（`requestWifiRestart()` + `loop()` 末尾 `serviceWifiRestart()`）②补 4 处保护 ③去重 + 补完整 0–282 偏移表 + 标注遗留字段 |
-| **N9** | 两个诊断遗留物：① `serial_commands.cpp` 里 `while(!Serial && …<2000)` 与 `while(!hwUart && …<1000)` 是**死等** —— `ARDUINO_USB_CDC_ON_BOOT=0` 时 `Serial` 就是 `Serial0`（`HardwareSerial.h:449-451`），而 `HardwareSerial::operator bool()` = `uartIsDriverInstalled()`（`HardwareSerial.cpp:594-596`），`begin()` 之后恒真，两个循环第一次判断就退出。注释里的「初始化 USB CDC 串口」也与本构建不符；② `minimal_test/minimal_test.ino` 的头注释说「Serial (USB CDC) 输出到串口监视器」，同样问题 —— 下次拿它做开机诊断前必须先改，否则会误判成「代码没跑」 | ⬜ **未修**（属注释订正与遗留文件去留，与 B5 一并待定） |
+| **N9** | 两个诊断遗留物：① `serial_commands.cpp` 里 `while(!Serial && …<2000)` 与 `while(!hwUart && …<1000)` 是**死等** —— `ARDUINO_USB_CDC_ON_BOOT=0` 时 `Serial` 就是 `Serial0`（`HardwareSerial.h:449-451`），而 `HardwareSerial::operator bool()` = `uartIsDriverInstalled()`（`HardwareSerial.cpp:594-596`），`begin()` 之后恒真，两个循环第一次判断就退出。注释里的「初始化 USB CDC 串口」也与本构建不符；② `minimal_test/minimal_test.ino` 的头注释说「Serial (USB CDC) 输出到串口监视器」，同样问题 —— 下次拿它做开机诊断前必须先改，否则会误判成「代码没跑」 | ✅ ①两处**分别处理**：`Serial` 那处**保留**（CDC=0 下是死等，但若将来打开 `ARDUINO_USB_CDC_ON_BOOT`，`Serial` 变 HWCDC、`operator bool` 表示「主机已连接」，那时它就有用了）；`hwUart` 那处**删除**（它永远是 `HardwareSerial`，任何配置下都是纯死代码，连 `begin()` 失败都救不了）。两处都写明理由，免得被当成疏漏又加回来。`.h`/`.cpp` 里全部「USB CDC」措辞订正为 UART0 (GPIO43/44)。②头注释重写，并修掉其中**更危险的第二处错误**：原文说「GPIO 48 如果是普通 LED 会亮」，而本板 GPIO48 是 **WS2812 可寻址灯珠**（`pump_shared.h` 的 `LED_PIN` + `led.cpp` 用 Adafruit_NeoPixel），`digitalWrite(48, HIGH)` 点不亮 —— 排查开机循环时据此判断「代码没跑」会完全误判。现在明确以 GPIO5 + 万用表为最可靠路径 |
 
 **复审时撤回的一条疑虑**：按 DM542 的接口语义（ENA 光耦导通 = 脱机、悬空 = 默认使能），
 `peristaltic_pump.ino` 里 `digitalWrite(ENA_PIN, HIGH)` 配「ENA 始终使能」的注释在语义上可疑
 （HIGH 究竟是使能还是脱机，取决于共阳/推挽接法与放大器是否反相）。但 B3 已写明
-**ENA 未接（方案 D）**，GPIO18 的驱动对驱动器没有电气影响，故不作为缺陷。残留两点：
-`ensureStepperOn()` 只置一个 flag（B3 已记录），且源码里 3 处「ENA 始终使能 / 始终 HIGH」
-的注释在未接线下属误导 —— **若将来真的接线，必须先用万用表确认 MCU HIGH 时 DM542 侧光耦
-是否导通，不能沿用现在的注释。**
+**ENA 未接（方案 D）**，GPIO18 的驱动对驱动器没有电气影响，故不作为缺陷。
+
+原先记的两个残留项现已处理：源码里 3 处「ENA 始终使能 / 始终 HIGH」的误导性注释
+（`pump_shared.h` 的 `ENA_PIN`、`peristaltic_pump.ino` 的 `digitalWrite`、
+`pump_core.cpp` 的 `ensureStepperOn()`）已全部按「有驱动但未接线」重写，并把
+**接线前必须先量什么**写进了 `.ino` 的注释里：用万用表确认「MCU 输出 HIGH 时 DM542 侧
+光耦是否导通」，再决定该写 HIGH 还是 LOW，不得沿用旧措辞。
+`ensureStepperOn()` 只置一个 flag 这件事本身仍属 B3（涉及遥测 schema，待产品决策）。
 
 ---
 
@@ -711,6 +717,83 @@ mojibake**：UTF-8 字节被按 GBK 解码后又存成 UTF-8，且 GBK 无法解
 > 2026-09-26 之前的条目记录的是**当时**的代码状态。其中若干机制此后已被移除或改正
 > （FreeRTOS 命令队列、`/api/info`、STA 30 s 超时、3 秒堵转检测、"RMT 迁移"），
 > 阅读时请以 §2–§4 的当前描述为准。
+
+### v2.4.3 (2026-11-05) — 复审收尾：N7 / N9 + ENA 注释订正 + 仓库清理
+
+> v2.4.2 的收尾。§5「N 组」9 条到此全部处理完，剩下的开放项都在 B 组（产品决策）。
+
+**N7 — `prime_start` 不设 `pumpStartMs`，排气期间 pause/resume 会算出垃圾**
+
+- UI 在 PRIME 期间暂停键是**亮的**（`index.html` 的按钮逻辑只看 `d.state == 'RUNNING'`、
+  不看 `menu`），而 `pause` 的守卫也只有 `state != RUNNING` ⇒ 排气时按暂停是合法操作。
+  但 `prime_start` 从没设过 `pump.pumpStartMs`，于是 TIME 模式下 `pausePump()` 会拿
+  上一次普通运行（或开机）留下的陈旧值算 `pausedElapsedSec`，`resumePump()` 再据此把
+  `pumpStartMs` 回绕到接近 0；遥测 `elapsed` 全程显示的是开机以来的秒数
+- 修法是补一行 `pump.pumpStartMs = millis()`，**不是**改成「排气期间拒绝 pause」——
+  那会让一个亮着的按钮点了报错。补上起始时刻后 pause/resume 在排气期间语义正确，
+  而 `pausedRemainingSteps ≈ 1e9`（来自 `moveTo(999999999)`）恰恰是想要的：
+  resume 后继续无限跑，正是排气该有的行为，所以刻意不动它
+- 排气速度写死 `flowRateToPPS(1500.0)`、忽略用户 `flowRate`，属设计意图，未改。
+  顺带把边界算清并写进注释：DM542 手册 200 kHz 上限反推 `stepsPerMl ≤ 8000`，
+  现实标定值 160–800 对应 4–20 kHz，够不着
+
+**N9 — 两个诊断遗留物**
+
+- `serial_commands.cpp` 里两处 `while (!Serial && … < 2000)` / `while (!hwUart && … < 1000)`
+  在本构建下都是**死等**：`ARDUINO_USB_CDC_ON_BOOT=0` 时 core 3.3.11 的
+  `HardwareSerial.h:449-451` 走 `#define Serial Serial0`，而
+  `HardwareSerial::operator bool()` 的实现是 `uartIsDriverInstalled(_uart)`
+  （`HardwareSerial.cpp:594-596`），`begin()` 之后恒为 true，循环第一次判断就退出
+- **两处分别处理，不是一刀切**：
+  - `Serial` 那处**保留** —— 若将来把 `ARDUINO_USB_CDC_ON_BOOT` 打开，`Serial` 变成 HWCDC、
+    `operator bool` 表示「主机已连接」，这个最多 2 s 的等待就真的有用了（否则 hello 帧会在
+    枚举完成前发出去直接丢掉）。删掉省 0 ms，代价是将来切 CDC 时静默丢 hello，不划算
+  - `hwUart` 那处**删除** —— 它永远是 `HardwareSerial(1)`，任何配置下都不会变成 HWCDC，
+    所以那段等待在本构建和任何未来构建里都是纯死代码，连 `begin()` 失败都救不了
+    （真失败的话等 1 s 之后照样往死端口打 hello）。理由写进了注释，免得被当成疏漏又加回来
+- `.h` / `.cpp` 里全部「USB CDC」措辞订正为 **UART0 (GPIO43 TX / 44 RX)**，并写明
+  「插 USB 看不到输出，必须接 USB-TTL」。原先 `serial_commands.h` 还说
+  `initSerialCommands()` 会「打印 READY 横幅」，实际打的是一帧含 `FW_VERSION` 的 hello JSON
+- `minimal_test/minimal_test.ino` 头注释重写，并修掉其中**比 CDC 措辞更危险的第二处错误**：
+  原文说「GPIO 48 如果是普通 LED 会亮」，而本板（ESP32-S3-DevKitC-1 N16R8）GPIO48 是
+  **单颗 WS2812 可寻址灯珠**（`pump_shared.h` 的 `LED_PIN` + `led.cpp` 用 Adafruit_NeoPixel），
+  `digitalWrite(48, HIGH)` 点不亮它，只会往数据线发一个恒高电平。这个文件是 2026-10-16
+  排查开机循环时留下的诊断工具，**据此判断「代码没跑」会完全误判**。现在明确以
+  GPIO5 + 万用表直流档为最可靠路径（不依赖串口、不依赖 USB 枚举、不依赖任何库），
+  并刻意不给它引入 NeoPixel 依赖（那就不是「最简」测试了）
+
+**ENA 三处误导注释订正**（§5「复审时撤回的一条疑虑」的收尾）
+
+- `pump_shared.h` 的 `ENA_PIN`、`peristaltic_pump.ino` 的 `digitalWrite(ENA_PIN, HIGH)`、
+  `pump_core.cpp` 的 `ensureStepperOn()` 原先都写「ENA 始终使能 / 始终 HIGH」。
+  但 B3 已写明 **ENA 未接线（方案 D）**，GPIO18 的驱动对驱动器没有任何电气作用
+- 按 DM542 的接口语义（ENA 光耦导通 = 脱机、悬空 = 默认使能），HIGH 究竟是使能还是脱机
+  完全取决于共阳/推挽接法与 3.3V→5V 放大器是否反相 —— 没接线就无从谈起，旧措辞属误导
+- 三处全部按「有驱动但未接线」重写，并把**接线前必须先量什么**写进 `.ino`：
+  用万用表确认「MCU 输出 HIGH 时 DM542 侧光耦是否导通」，再决定该写 HIGH 还是 LOW。
+  `ensureStepperOn()` 只置一个 flag 这件事本身仍属 B3（涉及遥测 schema，待产品决策）
+
+**仓库清理**
+
+- **B5 已决**：`git rm tools/pump_cli.py`，保留根目录那份（`fc /b` 确认两者逐字节相同）。
+  README §4 的项目结构树删掉 `tools/pump_cli.py` 一行、根目录那行的「tools/ 下有一份
+  完全相同的副本」注释也去掉；「命令行工具」一节本来就只写 `pump_cli.py`，无需改
+- `peristaltic_pump/idf_component.yml` 加进 `.gitignore`（内容是 ESP-IDF 组件管理器生成的
+  2 行 `idf: '>=5.1'`，每次 `pio run` 重新生成，不是源码）。此前它既未跟踪也未被忽略，
+  `git status` 里会一直挂着一条 `??`
+- `hardware/pcb/` 那 4 个未暂存删除**仍未处理**（用户自己的改动，`git restore hardware/pcb`
+  可完全恢复，blob 还在 index 里）。本次提交按显式路径 add，没有用 `git add -u`
+
+编译验证：`pio run`（FastAccelStepper 1.2.7）**SUCCESS** — Flash 1064052 B (33.8%)、
+RAM 53076 B (16.2%)；`arduino-cli --warnings all`（FastAccelStepper 1.4.0）exitCode 0 —
+Sketch 1043392 B (33%)、RAM 53076 B (16%)，**本项目代码零警告**（唯一一条仍是
+`FastAccelStepper/src/pd_esp32/StepperISR_idf5_esp32_mcpwm_pcnt.cpp:354` 的
+`gpio_iomux_in` 弃用提示）。比 v2.4.2 少 28 B（pio）—— 正是删掉 `hwUart` 那段死等的量。
+`node tools/test_ui_preview_sim.js` 111 passed / 0 failed（本版无固件语义变更，断言数不变）。
+
+**未上板验证**：本版除 N7 外全是注释 / 文档 / 仓库清理，无运动学或计量语义变更，
+v2.4.2 那份清单继续适用。N7 单独一条：排气中按暂停再继续，遥测 `elapsed` 应显示
+**本次排气的秒数**而不是开机以来的秒数，且 resume 后电机继续转。
 
 ### v2.4.2 (2026-11-05) — 定时模式斜坡补偿 + 计量正确性 + 健壮性
 

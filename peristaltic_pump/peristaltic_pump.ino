@@ -62,7 +62,15 @@ void setup() {
     for (;;) delay(1000);
   }
   stepper->setDirectionPin(DIR_PIN);
-  // ENA 始终使能: DM542 不支持运行时切使能, SW4 半流待机已够降温
+  // ENA_PIN(18) 有驱动, 但**没有接线到 DM542**（方案D: 脱机端悬空 = 默认使能,
+  // 降温靠 DM542 自己的 SW4 半流待机）。所以这行 HIGH 对驱动器没有任何电气作用,
+  // 只是把 GPIO 定在一个确定电平上。
+  // 原注释写「ENA 始终使能」是误导: 按 DM542 的接口语义（ENA 光耦导通 = 脱机、
+  // 悬空 = 默认使能）, HIGH 究竟是使能还是脱机, 完全取决于共阳/推挽接法与
+  // 3.3V→5V 放大器是否反相 —— 而这里根本没接线, 无从谈起。
+  // ⚠️ 将来若真的接线: 先用万用表量「MCU 输出 HIGH 时 DM542 侧光耦是否导通」,
+  //    再决定这行该写 HIGH 还是 LOW, 不要沿用本段措辞。接线后还要复查
+  //    ensureStepperOn() 与遥测的 stepperEnabled（审查档案 B3）。
   digitalWrite(ENA_PIN, HIGH);
   pump.stepperEnabled = true;
   updateStepperSpeed();

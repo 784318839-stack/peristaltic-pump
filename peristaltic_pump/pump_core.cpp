@@ -42,7 +42,10 @@ void updateStepperSpeed() {
 }
 
 void ensureStepperOn() {
-  // ENA 始终 HIGH (DM542 不支持运行时切使能, 半流待机降温)
+  // 名不副实: 这个函数**不操作任何硬件**, 只把遥测用的 stepperEnabled 置 true。
+  // ENA_PIN(18) 虽有驱动但未接线到 DM542 (方案D, 详见 peristaltic_pump.ino),
+  // 所以也没有「使能」可切; stepperEnabled 恒为 true 是审查档案 B3 记录的已知项
+  // (删除它会改遥测 schema, 属产品决策, 未动)。
   pump.stepperEnabled = true;
 }
 

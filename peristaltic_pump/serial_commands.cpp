@@ -1,10 +1,13 @@
 /******************************************************************************
- * serial_commands.cpp — USB CDC & 硬件 UART 串口命令实现
+ * serial_commands.cpp — UART0 (Serial) & 硬件 UART1 串口命令实现
  *
  * 帧格式 : 换行分隔的 JSON ( 兼容 \n , \r\n )
  * 最大单帧 : 1024 字节 (SERIAL_BUF_SIZE)
  *
  * 缓冲区分配在 PSRAM 中, 减少内部 SRAM 占用
+ *
+ * 注意 `Serial` 在本构建里是 **UART0 (GPIO43/44)**, 不是原生 USB CDC ——
+ * platformio.ini 钉了 -DARDUINO_USB_CDC_ON_BOOT=0, 详见 serial_commands.h 头部。
  ******************************************************************************/
 #include "serial_commands.h"
 #include "command_protocol.h"
@@ -35,6 +38,13 @@ void initSerialBuffers() {
 }
 
 void initSerialCommands() {
+  // 下面这个等待在**本构建里是死等**, 但刻意保留:
+  //   CDC=0 (当前): `Serial` 就是 `Serial0`, 而 HardwareSerial::operator bool() 的实现是
+  //     `uartIsDriverInstalled(_uart)` (core 3.3.11 HardwareSerial.cpp:594-596), begin()
+  //     之后恒为 true ⇒ 循环第一次判断就退出, 一毫秒都不等。
+  //   CDC=1 (若将来打开): `Serial` 变成 HWCDC, operator bool() 表示「主机已连接」,
+  //     这个最多 2 s 的等待就真的有用了 —— 否则 hello 帧会在枚举完成前发出去、直接丢掉。
+  // 删掉它省下的是 0 ms, 代价是将来切 CDC 时静默丢掉 hello。不划算。
   unsigned long start = millis();
   while ( !Serial && millis() - start < 2000 ) { delay( 10 ); }
   Serial.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"" FW_VERSION "\"}" );
@@ -69,8 +79,12 @@ void initHardwareUart() {
   // (JSON 解析 + 生成响应) 可能更久 -> 长命令帧会被截断。
   hwUart.setRxBufferSize( SERIAL_BUF_SIZE );
   hwUart.begin( 115200, SERIAL_8N1, HW_UART_RX, HW_UART_TX );
-  unsigned long start = millis();
-  while ( !hwUart && millis() - start < 1000 ) { delay( 5 ); }
+  // 这里**刻意没有** initSerialCommands() 里那种 while(!hwUart && ...) 等待。
+  // hwUart 是 HardwareSerial(1), 任何配置下都不会变成 HWCDC, 而
+  // HardwareSerial::operator bool() == uartIsDriverInstalled(), begin() 之后恒为 true
+  // ⇒ 那种等待在本构建和任何未来构建里都是纯死代码, 连 begin() 失败都救不了
+  // (真失败的话等 1 s 之后照样往死端口打 hello)。与 Serial 那处的区别就在这个
+  // "将来有没有可能变得有用", 别当成疏漏又加回来。
   hwUart.println( "{\"type\":\"hello\",\"device\":\"PeristalticPump\",\"version\":\"" FW_VERSION "\",\"port\":\"UART1\"}" );
 }
 

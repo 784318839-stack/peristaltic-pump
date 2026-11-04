@@ -439,6 +439,13 @@ const char* parseAndExecute( const char* json ) {
       return errResponse( cmd, "Motor rejected prime move (see serial)" );
     }
     pump.dispensedVolume = 0;
+    // 必须设 pumpStartMs。不设的话遥测 elapsed 会显示「上次普通运行(或开机)以来的秒数」;
+    // 更要紧的是 UI 在 PRIME 期间暂停键是**亮的**(index.html 只看 d.state==RUNNING、不看 menu),
+    // 而 pause 的守卫也只有 state != RUNNING —— 于是 TIME 模式下 pausePump() 会拿这个陈旧值
+    // 算 pausedElapsedSec, resumePump() 再据此把 pumpStartMs 回绕到接近 0 (审查档案 N7)。
+    // 注: pausedRemainingSteps 变成约 1e9 反倒是想要的语义 —— resume 后继续无限跑,
+    // 正是排气该有的行为, 所以这里不动它。
+    pump.pumpStartMs = millis();
     pump.state = RUNNING;
     beepStart();
     return okResponse( cmd );

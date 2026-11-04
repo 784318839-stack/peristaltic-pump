@@ -8,6 +8,8 @@ build/
 
 # PlatformIO
 .pio/
+# ESP-IDF 组件管理器生成的清单（每次 pio run 重新生成，不是源码）
+peristaltic_pump/idf_component.yml
 
 # macOS
 .DS_Store

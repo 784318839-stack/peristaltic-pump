@@ -25,7 +25,7 @@ enum CalibStep { CALIB_IDLE, CALIB_SELECT_LIQUID, CALIB_SET_VOL,
 #define NUM_LIQUIDS 4
 #define STEP_PIN   16
 #define DIR_PIN    17
-#define ENA_PIN    18
+#define ENA_PIN    18   // 有驱动但**未接线**到 DM542 (方案D), 详见 .ino 里的说明
 #define BUZZER_PIN 5
 #define HW_UART_RX 21
 #define HW_UART_TX 47
